@@ -38,16 +38,35 @@ body {
   gap: 28px;
 }
 
+.masthead {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #1d3a96;
+}
 .wordmark {
   font-family: var(--display);
-  font-size: clamp(44px, 9vw, 84px);
-  line-height: 0.95;
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 1;
   letter-spacing: 0.01em;
   margin: 0;
-  color: var(--bulb);
-  text-shadow: 0 4px 0 var(--frame-dark), 0 0 28px rgba(255, 196, 0, 0.35);
-  transform: rotate(-2deg);
+  color: var(--ink);
+}
+.player { color: var(--ink-soft); font-size: 17px; text-align: right; }
+.player strong { color: var(--ink); font-weight: 600; }
+
+.intro {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(30px, 5vw, 44px);
+  line-height: 1.1;
+  margin: 12px 0 0;
   text-align: center;
+  text-wrap: balance;
 }
 
 .sub { margin: 0; color: var(--ink-soft); text-align: center; max-width: 52ch; }
@@ -184,11 +203,12 @@ body {
   cursor: pointer;
 }
 
-.name-card { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 14px; }
+.name-card { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 14px; }
 .name-card label { font-weight: 600; }
+.name-card .hint { text-align: left; }
 .name-card input {
   font-family: var(--body);
-  font-size: 22px;
+  font-size: 20px;
   padding: 14px 16px;
   border-radius: 10px;
   border: 2px solid #2a4db8;
@@ -202,12 +222,13 @@ body {
 
 .survey-says {
   font-family: var(--display);
-  font-size: clamp(40px, 8vw, 72px);
+  font-size: 34px;
   color: var(--bulb);
   text-align: center;
-  animation: pulse 0.9s ease-in-out infinite alternate;
+  margin: 0;
+  animation: pulse 0.8s ease-in-out infinite alternate;
 }
-@keyframes pulse { from { opacity: 0.55; transform: scale(0.97); } to { opacity: 1; transform: scale(1.03); } }
+@keyframes pulse { from { opacity: 0.45; } to { opacity: 1; } }
 
 /* ---------- Your answers ---------- */
 .yours-panel {
@@ -243,5 +264,4 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .flip .tile, .survey-says { animation: none; }
-  .wordmark { transform: none; }
 }

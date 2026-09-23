@@ -4,7 +4,8 @@ import { parseJSON, type Store } from "./store";
 export const BOARD_SIZE = 8;
 
 export type Submission = {
-  name: string;
+  email: string;
+  name: string; // first name, for display
   answers: { raw: string; category: string }[];
   at: number;
 };
@@ -36,15 +37,15 @@ export function gameKeys(day: string, questionId: string) {
 }
 export type GameKeys = ReturnType<typeof gameKeys>;
 
-export function nameKey(name: string) {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
+export function playerKey(email: string) {
+  return email.trim().toLowerCase();
 }
 
-export async function buildResults(store: Store, keys: GameKeys, forName?: string) {
+export async function buildResults(store: Store, keys: GameKeys, forEmail?: string) {
   const [rawCounts, players, rawMine] = await Promise.all([
     store.hgetall(keys.counts),
     store.hlen(keys.subs),
-    forName ? store.hget(keys.subs, nameKey(forName)) : Promise.resolve(null),
+    forEmail ? store.hget(keys.subs, playerKey(forEmail)) : Promise.resolve(null),
   ]);
 
   const counts = Object.entries(rawCounts)

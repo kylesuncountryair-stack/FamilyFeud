@@ -5,13 +5,14 @@ the day's survey question, lock them in, and see the team's top answers on the b
 
 ## How it works
 
-1. **Name screen**: the agent enters their name (remembered on their device).
+1. **Sign in**: the agent enters their @suncountry.com email (remembered on their
+   device). The game calls them by first name, taken from `Firstname.Lastname@suncountry.com`.
 2. **Board**: today's question with three answer tiles. "Lock in answers" is final.
 3. **Results**: the top 8 answer groups with how many players said each. The agent's
    matches are outlined in gold, and they score the player count for each of their
    answers that made the board. The board refreshes every 15 seconds.
 
-Each name can play once per day. A new question rotates in at midnight (`GAME_TIMEZONE`).
+Each email can play once per day. Every play is logged to a Google Sheet (see below). A new question rotates in at midnight (`GAME_TIMEZONE`).
 
 ## How answers get grouped
 
@@ -35,7 +36,27 @@ A player counts once per group, so "socks" + "shirts" from one person = 1 vote f
    - `ANTHROPIC_API_KEY`: from console.anthropic.com (recommended for grouping)
    - `ADMIN_KEY`: any secret string
    - `GAME_TIMEZONE`: e.g. `America/New_York`
+   - `SHEETS_WEBHOOK_URL` and `SHEETS_WEBHOOK_SECRET`: see the next section
 5. Redeploy so the new variables take effect.
+
+## Google Sheet play log
+
+Every locked-in play adds a row to a **Plays** tab: timestamp, game day, email,
+first name, question, and each answer with the group it was counted in.
+
+1. Create (or open) the Google Sheet you want to use.
+2. **Extensions → Apps Script**, delete the sample code, and paste in
+   `google-apps-script/Code.gs`.
+3. Change `SECRET` at the top to a long random string.
+4. **Deploy → New deployment → Web app**. Set *Execute as: Me* and
+   *Who has access: Anyone*, then deploy and approve the permissions.
+5. Copy the Web app URL (ends in `/exec`) into Vercel as `SHEETS_WEBHOOK_URL`, and the
+   secret as `SHEETS_WEBHOOK_SECRET`. Redeploy.
+
+"Anyone" only means the URL doesn't need a Google login; requests without the secret
+are rejected. The sheet itself stays private to you. Logging happens after the player
+sees their results, so a slow or broken sheet never holds up the game. If you change
+the script later, use **Manage deployments → Edit → New version** to keep the same URL.
 
 Without Redis the app falls back to in-memory storage, which is fine locally but
 **won't share answers between players on Vercel**.
@@ -84,4 +105,7 @@ lib/questions.ts          question list and keyword groups
 lib/categorize.ts         answer grouping pipeline
 lib/game.ts               day rollover, keys, scoring
 lib/store.ts              Upstash Redis (or in-memory fallback)
+lib/identity.ts           email validation and first-name parsing
+lib/sheets.ts             Google Sheets logger
+google-apps-script/       script to paste into your Google Sheet
 ```

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
 
 type Question = { day: string; questionId: string; prompt: string };
 type MyAnswer = { raw: string; category: string; count: number; onBoard: boolean };
@@ -11,14 +12,15 @@ type Results = {
 };
 type Stage = "loading" | "name" | "play" | "reveal" | "results";
 
-const NAME_KEY = "survey-says:name";
+const EMAIL_KEY = "survey-says:email";
 const BOARD_SLOTS = 8;
 const POLL_MS = 15_000;
 
 export default function Home() {
   const [question, setQuestion] = useState<Question | null>(null);
   const [stage, setStage] = useState<Stage>("loading");
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [player, setPlayer] = useState(""); // signed-in email
   const [answers, setAnswers] = useState(["", "", ""]);
   const [results, setResults] = useState<Results | null>(null);
   const [error, setError] = useState("");
@@ -26,7 +28,7 @@ export default function Home() {
   const firstInput = useRef<HTMLInputElement>(null);
 
   const fetchResults = useCallback(async (who: string): Promise<Results> => {
-    const res = await fetch(`/api/results?name=${encodeURIComponent(who)}`, { cache: "no-store" });
+    const res = await fetch(`/api/results?email=${encodeURIComponent(who)}`, { cache: "no-store" });
     if (!res.ok) throw new Error("results");
     const data: Results = await res.json();
     setResults(data);
@@ -36,8 +38,8 @@ export default function Home() {
   // Load today's question + remembered name
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(NAME_KEY);
-      if (saved) setName(saved);
+      const saved = localStorage.getItem(EMAIL_KEY);
+      if (saved) setEmail(saved);
     } catch {}
     fetch("/api/question", { cache: "no-store" })
       .then((r) => r.json())
@@ -58,17 +60,18 @@ export default function Home() {
   // Keep the board fresh while people are still playing
   useEffect(() => {
     if (stage !== "results") return;
-    const id = setInterval(() => fetchResults(name).catch(() => {}), POLL_MS);
+    const id = setInterval(() => fetchResults(player).catch(() => {}), POLL_MS);
     return () => clearInterval(id);
-  }, [stage, name, fetchResults]);
+  }, [stage, player, fetchResults]);
 
   async function start() {
-    const who = name.trim();
-    if (!who) return setError("Enter your name to start.");
+    const who = normalizeEmail(email);
+    if (!isValidEmail(who)) return setError(`Enter your @${EMAIL_DOMAIN} email address.`);
     setError("");
     setBusy(true);
+    setPlayer(who);
     try {
-      localStorage.setItem(NAME_KEY, who);
+      localStorage.setItem(EMAIL_KEY, who);
     } catch {}
     try {
       const r = await fetchResults(who);
@@ -95,7 +98,7 @@ export default function Home() {
       const res = await fetch("/api/submit", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), answers: trimmed }),
+        body: JSON.stringify({ email: player, answers: trimmed }),
       });
       const data = await res.json();
       if (!res.ok && res.status !== 409) throw new Error(data.error || "Your answers didn't save.");
@@ -112,15 +115,32 @@ export default function Home() {
 
   return (
     <main className="stage">
-      <h1 className="wordmark">Survey Says!</h1>
+      <header className="masthead">
+        <h1 className="wordmark">Survey Says</h1>
+        {player && stage !== "name" && (
+          <span className="player">
+            Playing as <strong>{firstNameFromEmail(player)}</strong>{" "}
+            <button
+              className="link"
+              onClick={() => {
+                setPlayer("");
+                setResults(null);
+                setAnswers(["", "", ""]);
+                setStage("name");
+              }}
+            >
+              Not you?
+            </button>
+          </span>
+        )}
+      </header>
 
       {stage === "loading" && <p className="sub">Loading today&rsquo;s question…</p>}
 
       {stage === "name" && (
         <>
-          <p className="sub">
-            One question a day. Give your three best answers, then see how the team answered.
-          </p>
+          <h2 className="intro">One survey question a day. Give your top three answers.</h2>
+          <p className="sub">Then see how the rest of the team answered.</p>
           <form
             className="name-card"
             onSubmit={(e) => {
@@ -128,13 +148,16 @@ export default function Home() {
               start();
             }}
           >
-            <label htmlFor="name">Your name</label>
+            <label htmlFor="email">Your Sun Country email</label>
             <input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={40}
-              autoComplete="name"
+              id="email"
+              type="email"
+              inputMode="email"
+              placeholder={`firstname.lastname@${EMAIL_DOMAIN}`}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              maxLength={80}
+              autoComplete="email"
               autoFocus
             />
             <button className="btn" type="submit" disabled={busy || !question}>
@@ -184,7 +207,7 @@ export default function Home() {
               ) : allFilled && hasDupes ? (
                 <p className="hint">Each answer needs to be different.</p>
               ) : (
-                <p className="hint">Playing as {name.trim()}. Answers are final once locked in.</p>
+                <p className="hint">Answers are final once locked in.</p>
               )}
             </>
           ) : (
@@ -196,7 +219,7 @@ export default function Home() {
       )}
 
       {stage === "results" && results && question && (
-        <ResultsView question={question} results={results} onRefresh={() => fetchResults(name)} />
+        <ResultsView question={question} results={results} onRefresh={() => fetchResults(player)} />
       )}
     </main>
   );
