@@ -58,6 +58,15 @@ are rejected. The sheet itself stays private to you. Logging happens after the p
 sees their results, so a slow or broken sheet never holds up the game. If you change
 the script later, use **Manage deployments → Edit → New version** to keep the same URL.
 
+### Troubleshooting the sheet
+
+Open `https://your-app.vercel.app/api/admin/sheet-test?key=YOUR_ADMIN_KEY` in a browser.
+It sends a test row and tells you exactly what went wrong if it fails (missing
+variable, wrong secret, Google sign-in wall, script error).
+
+Also note: each email can only play once per day, and repeat attempts aren't logged.
+If you played before the sheet was connected, your own row won't appear until tomorrow.
+
 Without Redis the app falls back to in-memory storage, which is fine locally but
 **won't share answers between players on Vercel**.
 

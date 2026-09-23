@@ -17,6 +17,10 @@
 
 const SECRET = "change-me-to-a-long-random-string";
 const SHEET_NAME = "Plays";
+// Only needed if you created this script at script.google.com instead of from
+// the sheet's Extensions menu. Paste the ID from the sheet's URL:
+// docs.google.com/spreadsheets/d/THIS_PART/edit
+const SPREADSHEET_ID = "";
 const HEADERS = [
   "Timestamp", "Game day", "Email", "First name", "Question",
   "Answer 1", "Group 1", "Answer 2", "Group 2", "Answer 3", "Group 3",
@@ -30,7 +34,10 @@ function doPost(e) {
     const lock = LockService.getScriptLock();
     lock.waitLock(10000);
     try {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const ss = SPREADSHEET_ID
+        ? SpreadsheetApp.openById(SPREADSHEET_ID)
+        : SpreadsheetApp.getActiveSpreadsheet();
+      if (!ss) throw new Error("No spreadsheet found. Open the script from the sheet's Extensions menu, or set SPREADSHEET_ID.");
       let sheet = ss.getSheetByName(SHEET_NAME);
       if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
       if (sheet.getLastRow() === 0) {
@@ -50,6 +57,11 @@ function doPost(e) {
   } catch (err) {
     return json({ ok: false, error: String(err) });
   }
+}
+
+/** Open the /exec URL in a browser to check the deployment is reachable. */
+function doGet() {
+  return json({ ok: true, message: "Survey Says logger is running. Rows arrive via POST from the game." });
 }
 
 function json(obj) {
