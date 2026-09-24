@@ -58,7 +58,6 @@ export default function Home() {
   const [historyError, setHistoryError] = useState("");
   const [weekTotal, setWeekTotal] = useState<number | null>(null);
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
-  const [lbWeek, setLbWeek] = useState(0);
   const [lbError, setLbError] = useState("");
 
   const refreshWeekTotal = useCallback(async (who: string) => {
@@ -75,20 +74,19 @@ export default function Home() {
     if (!SIDE_STAGES.includes(stage)) setReturnTo(stage === "reveal" ? "play" : stage);
   }
 
-  async function openLeaderboard(week = lbWeek) {
+  async function openLeaderboard() {
     rememberReturn();
     setStage("leaderboard");
-    setLbWeek(week);
     setLbError("");
     setLeaderboard(null);
     try {
-      const qs = new URLSearchParams({ week: String(week) });
+      const qs = new URLSearchParams();
       if (player) qs.set("email", player);
       const res = await fetch(`/api/leaderboard?${qs}`, { cache: "no-store" });
       if (!res.ok) throw new Error();
       const data: Leaderboard = await res.json();
       setLeaderboard(data);
-      if (week === 0 && player) setWeekTotal(data.me?.total ?? 0);
+      if (player) setWeekTotal(data.me?.total ?? 0);
     } catch {
       setLbError("The leaderboard didn't load. Try again in a moment.");
     }
@@ -269,7 +267,7 @@ export default function Home() {
         </h1>
         <nav className="nav">
           {stage !== "loading" && stage !== "leaderboard" && (schedule?.status !== "before" || player) && (
-            <button className="nav-btn" onClick={() => openLeaderboard(0)}>
+            <button className="nav-btn" onClick={() => openLeaderboard()}>
               Leaderboard
             </button>
           )}
@@ -284,7 +282,7 @@ export default function Home() {
             {weekTotal !== null && (
               <button
                 className="week-pill"
-                onClick={() => openLeaderboard(0)}
+                onClick={() => openLeaderboard()}
                 title="Your points this week. Click to see the leaderboard."
               >
                 {weekTotal} pts this week
@@ -481,7 +479,7 @@ export default function Home() {
               <h2 className="intro">That&rsquo;s a wrap!</h2>
               <p className="sub">Thanks for playing. See how everyone finished, or look back at every day&rsquo;s board.</p>
               <div className="closed-actions">
-                <button className="btn" onClick={() => openLeaderboard(0)}>
+                <button className="btn" onClick={() => openLeaderboard()}>
                   See final standings
                 </button>
                 <button className="back" onClick={openHistory}>
@@ -500,21 +498,6 @@ export default function Home() {
           </button>
           <div className="lb-head">
             <h2 className="section-title">Leaderboard</h2>
-            {!leaderboard?.event && (
-            <div className="tabs" role="tablist" aria-label="Week">
-              {["This week", "Last week"].map((label, w) => (
-                <button
-                  key={label}
-                  role="tab"
-                  aria-selected={lbWeek === w}
-                  className={`tab ${lbWeek === w ? "active" : ""}`}
-                  onClick={() => openLeaderboard(w)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            )}
           </div>
           {leaderboard && (
             <p className="sub left">
@@ -526,16 +509,14 @@ export default function Home() {
                 ? " Weekend points can still shift today while people catch up."
                 : schedule?.status === "over"
                   ? ""
-                  : lbWeek === 0
-                    ? " Today\u2019s points can still shift until midnight."
-                    : ""}
+                  : " Today\u2019s points can still shift until midnight."}
             </p>
           )}
           {lbError && <p className="error">{lbError}</p>}
           {!leaderboard && !lbError && <p className="hint left">Loading…</p>}
           {leaderboard && leaderboard.leaders.length === 0 && (
             <p className="empty">
-              {lbWeek === 0 ? "No one has played yet this week. Be the first!" : "No one played last week."}
+              No one has played yet this week. Be the first!
             </p>
           )}
           {leaderboard && leaderboard.leaders.length > 0 && (
@@ -560,7 +541,7 @@ export default function Home() {
             </div>
           )}
           {leaderboard && player && !leaderboard.me && leaderboard.leaders.length > 0 && (
-            <p className="hint left">You haven&rsquo;t played {lbWeek === 0 ? "yet this week" : "last week"}.</p>
+            <p className="hint left">You haven&rsquo;t played yet this week.</p>
           )}
         </section>
       )}
