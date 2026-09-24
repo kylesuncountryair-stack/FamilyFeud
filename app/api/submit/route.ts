@@ -1,5 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { categorize } from "@/lib/categorize";
+import { consolidate } from "@/lib/consolidate";
 import { buildResults, gameKeys, getToday, playerKey, type Submission } from "@/lib/game";
 import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
 import { logPlayToSheet } from "@/lib/sheets";
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ alreadyPlayed: true, ...(await buildResults(store, keys, email)) }, { status: 409 });
   }
 
+  const existingGroups = new Set(Object.keys(await store.hgetall(keys.counts)));
   const groups = await categorize(question, answers, store, keys);
   const sub: Submission = {
     email,
@@ -45,6 +47,12 @@ export async function POST(req: Request) {
 
   // Each player counts once per group, even if two of their answers landed in the same one
   await Promise.all([...new Set(groups)].map((g) => store.hincrby(keys.counts, g, 1)));
+
+  // If this play started a new group, have Claude tidy the whole board afterwards
+  // (e.g. fold a new "Advil" group into "Medication"). Players never wait on it.
+  if (groups.some((g) => !existingGroups.has(g))) {
+    after(() => consolidate(store, keys, question).catch((e) => console.error("[survey-says] tidy failed", e)));
+  }
 
   // Log to Google Sheets after the response is sent, so players never wait on it
   after(() =>

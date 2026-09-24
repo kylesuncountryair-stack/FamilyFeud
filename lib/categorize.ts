@@ -1,6 +1,7 @@
 import type { Question } from "./questions";
 import type { GameKeys } from "./game";
 import type { Store } from "./store";
+import { callClaude, extractJSON } from "./claude";
 
 /**
  * Grouping pipeline, per answer:
@@ -49,56 +50,29 @@ function keywordMatch(norm: string, question: Question): string | null {
   return best?.group ?? null;
 }
 
-async function aiGroup(prompt: string, answers: string[], groups: string[]): Promise<string[] | null> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return null;
+export const GROUPING_RULES = `How a Family Feud host groups answers:
+- Group by the underlying idea, at the level most people would name it. Specific items go in their broad category: "pants", "skirt", "underwear" -> "Clothes"; "face wash", "toothbrush" -> "Toiletries".
+- Brand names go in their generic category: "Advil", "Tylenol", "ibuprofen" -> "Medication"; "Reader's Digest", "People" -> "Reading material".
+- Near-synonyms are one group: "charger", "charging cord" -> "Phone charger"; "magazine", "book" -> "Reading material".
+- Keep genuinely different ideas apart: "Passport" and "Clothes" are different; "Sunscreen" and "Toiletries" can stay separate if players name sunscreen specifically.
+- Group names: 1-3 words, sentence case, generic (never a brand name).
+- Fix obvious typos. Nonsense, jokes and non-answers go in "Other".`;
 
+async function aiGroup(prompt: string, answers: string[], groups: string[]): Promise<string[] | null> {
   const system = `You group free-form answers for a Family Feud style survey game.
-Rules:
-- Put each answer in the group that captures the same idea, the way a Family Feud host would accept it. Group broadly: "pants", "shirts" and "underwear" are all "Clothes"; "phone charger" and "charging cord" are both "Phone charger".
-- Strongly prefer an existing group. Only create a new group when no existing group fits.
-- New group names: 1-3 words, sentence case, general enough for similar answers to join later.
-- Fix obvious typos. Answers that are nonsense, jokes or not an answer go in "Other".
+${GROUPING_RULES}
+- Strongly prefer an existing group when it fits. Only create a new group when none does.
 - Respond with ONLY a JSON array of strings, one group per answer, in the same order. No other text.`;
 
   const user = `Survey question: ${prompt}
 Existing groups: ${groups.length ? JSON.stringify(groups) : "(none yet)"}
 Answers: ${JSON.stringify(answers)}`;
 
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001",
-        max_tokens: 300,
-        system,
-        messages: [{ role: "user", content: user }],
-      }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) {
-      console.error("[survey-says] Claude API error", res.status, await res.text());
-      return null;
-    }
-    const data = await res.json();
-    const text: string = (data.content ?? [])
-      .filter((b: { type: string }) => b.type === "text")
-      .map((b: { text: string }) => b.text)
-      .join("")
-      .replace(/```json|```/g, "")
-      .trim();
-    const parsed = JSON.parse(text.slice(text.indexOf("["), text.lastIndexOf("]") + 1));
-    if (!Array.isArray(parsed) || parsed.length !== answers.length) return null;
-    return parsed.map((g) => String(g).trim().slice(0, 40));
-  } catch (err) {
-    console.error("[survey-says] Grouping failed", err);
-    return null;
-  }
+  const res = await callClaude(system, user, 300);
+  if (!res.ok) return null;
+  const parsed = extractJSON<unknown[]>(res.text, "[");
+  if (!Array.isArray(parsed) || parsed.length !== answers.length) return null;
+  return parsed.map((g) => String(g).trim().slice(0, 40));
 }
 
 export async function categorize(

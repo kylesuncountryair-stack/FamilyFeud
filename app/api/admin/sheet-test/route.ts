@@ -22,22 +22,43 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, problem: "Wrong or missing ?key= (use ADMIN_KEY or SHEETS_WEBHOOK_SECRET)." }, { status: 401 });
   }
 
-  const { day, question } = getToday();
-  const result = await logPlayToSheet({
-    timestamp: new Date().toISOString(),
-    day,
-    email: "test.row@suncountry.com",
-    firstName: "Test",
-    question: `[TEST] ${question.prompt}`,
-    answers: [
-      { raw: "test 1", category: "Test" },
-      { raw: "test 2", category: "Test" },
-      { raw: "test 3", category: "Test" },
-    ],
-  });
-
-  return NextResponse.json(
-    result.ok ? { ok: true, message: "Test row sent. Check the Plays tab in your sheet." } : result,
-    { status: result.ok ? 200 : 502 }
-  );
+  try {
+    const { day, question } = getToday();
+    const result = await logPlayToSheet({
+      timestamp: new Date().toISOString(),
+      day,
+      email: "test.row@suncountry.com",
+      firstName: "Test",
+      question: `[TEST] ${question.prompt}`,
+      answers: [
+        { raw: "test 1", category: "Test" },
+        { raw: "test 2", category: "Test" },
+        { raw: "test 3", category: "Test" },
+      ],
+    });
+    if (!result || typeof result !== "object") {
+      return NextResponse.json(
+        { ok: false, problem: "lib/sheets.ts in your repo is an older version. Replace it with the one from the latest zip." },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json(
+      result.ok
+        ? {
+            ok: true,
+            message: result.wroteTo
+              ? `Saved to row ${result.wroteTo.row} of the "${result.wroteTo.tab}" tab in the spreadsheet "${result.wroteTo.spreadsheet}".`
+              : "Test row sent. Check the Plays tab in your sheet.",
+            openSheet: result.wroteTo?.url,
+          }
+        : result,
+      { status: result.ok ? 200 : 502 }
+    );
+  } catch (err) {
+    const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const hint = /time ?zone/i.test(message)
+      ? `GAME_TIMEZONE must be a name like America/Chicago or America/New_York (it is "${process.env.GAME_TIMEZONE}").`
+      : undefined;
+    return NextResponse.json({ ok: false, problem: "The test crashed.", error: message, hint }, { status: 500 });
+  }
 }

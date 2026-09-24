@@ -10,8 +10,31 @@ export type Submission = {
   at: number;
 };
 
+const TZ_ALIASES: Record<string, string> = {
+  central: "America/Chicago", cst: "America/Chicago", cdt: "America/Chicago", ct: "America/Chicago",
+  eastern: "America/New_York", est: "America/New_York", edt: "America/New_York", et: "America/New_York",
+  mountain: "America/Denver", mst: "America/Denver", mdt: "America/Denver", mt: "America/Denver",
+  arizona: "America/Phoenix",
+  pacific: "America/Los_Angeles", pst: "America/Los_Angeles", pdt: "America/Los_Angeles", pt: "America/Los_Angeles",
+};
+
+/** Accepts "America/Chicago", or friendly names like "Central". Never throws. */
+export function resolveTimeZone(value?: string) {
+  const raw = (value ?? "").trim();
+  const candidate = TZ_ALIASES[raw.toLowerCase().replace(/\s*(standard|daylight)?\s*time$/, "")] ?? raw;
+  try {
+    if (candidate) {
+      new Intl.DateTimeFormat("en-US", { timeZone: candidate });
+      return candidate;
+    }
+  } catch {
+    console.error(`[survey-says] GAME_TIMEZONE "${raw}" isn't a valid zone; using America/Chicago.`);
+  }
+  return "America/Chicago";
+}
+
 export function getToday(): { day: string; question: Question } {
-  const tz = process.env.GAME_TIMEZONE || "America/New_York";
+  const tz = resolveTimeZone(process.env.GAME_TIMEZONE);
   // en-CA formats as YYYY-MM-DD
   const day = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,

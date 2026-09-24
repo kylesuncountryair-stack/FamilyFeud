@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { gameKeys, getToday, rebuildCounts, type Submission } from "@/lib/game";
+import { gameKeys, getToday, type Submission } from "@/lib/game";
+import { mergeGroups } from "@/lib/consolidate";
 import { getStore, parseJSON } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -36,32 +37,6 @@ export async function POST(req: Request) {
   const to = String(body?.to ?? "").trim();
   if (!from || !to) return NextResponse.json({ error: "Send both 'from' and 'to'." }, { status: 400 });
 
-  const store = getStore();
-  const keys = resolveKeys(req.url);
-
-  const subs = await store.hgetall(keys.subs);
-  const updatedSubs: Record<string, string> = {};
-  let moved = 0;
-  for (const [who, v] of Object.entries(subs)) {
-    const s = parseJSON<Submission>(v);
-    if (!s) continue;
-    let changed = false;
-    s.answers = s.answers.map((a) => {
-      if (a.category !== from) return a;
-      changed = true;
-      moved++;
-      return { ...a, category: to };
-    });
-    if (changed) updatedSubs[who] = JSON.stringify(s);
-  }
-  await store.hset(keys.subs, updatedSubs);
-
-  // Point the grouping cache at the new group so future answers follow
-  const map = await store.hgetall(keys.map);
-  const updatedMap: Record<string, string> = {};
-  for (const [norm, g] of Object.entries(map)) if (g === from) updatedMap[norm] = to;
-  await store.hset(keys.map, updatedMap);
-
-  await rebuildCounts(store, keys);
+  const moved = await mergeGroups(getStore(), resolveKeys(req.url), { [from]: to });
   return NextResponse.json({ ok: true, moved });
 }
