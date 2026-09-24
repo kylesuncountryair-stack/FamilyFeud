@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { categorize } from "@/lib/categorize";
 import { consolidate } from "@/lib/consolidate";
+import { recordDay } from "@/lib/history";
 import { buildResults, gameKeys, getToday, playerKey, type Submission } from "@/lib/game";
 import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
 import { logPlayToSheet } from "@/lib/sheets";
@@ -44,6 +45,8 @@ export async function POST(req: Request) {
   if (!(await store.hsetnx(keys.subs, who, JSON.stringify(sub)))) {
     return NextResponse.json({ alreadyPlayed: true, ...(await buildResults(store, keys, email)) }, { status: 409 });
   }
+
+  await recordDay(store, day, question);
 
   // Each player counts once per group, even if two of their answers landed in the same one
   await Promise.all([...new Set(groups)].map((g) => store.hincrby(keys.counts, g, 1)));

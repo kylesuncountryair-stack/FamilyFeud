@@ -42,12 +42,16 @@ export function getToday(): { day: string; question: Question } {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+  return { day, question: questionForDay(day) };
+}
+
+/** Which question a given YYYY-MM-DD day uses (honours QUESTION_ID if pinned). */
+export function questionForDay(day: string) {
   const [y, m, d] = day.split("-").map(Number);
   const dayNumber = Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
   // Set QUESTION_ID to pin a specific question (handy for testing or a special day)
   const pinned = QUESTIONS.find((q) => q.id === process.env.QUESTION_ID);
-  const question = pinned ?? QUESTIONS[dayNumber % QUESTIONS.length];
-  return { day, question };
+  return pinned ?? QUESTIONS[dayNumber % QUESTIONS.length];
 }
 
 export function gameKeys(day: string, questionId: string) {
@@ -71,12 +75,17 @@ export async function buildResults(store: Store, keys: GameKeys, forEmail?: stri
     forEmail ? store.hget(keys.subs, playerKey(forEmail)) : Promise.resolve(null),
   ]);
 
+  // Points = % of today's players who gave that answer, like "we surveyed 100 people".
+  // Unlike raw counts, this doesn't grow as more people play, so early players aren't penalized.
+  const pct = (n: number) => (players > 0 ? Math.round((n / players) * 100) : 0);
+
   const counts = Object.entries(rawCounts)
-    .map(([category, n]) => ({ category, count: Number(n) }))
+    .map(([category, n]) => ({ category, count: Number(n), points: pct(Number(n)) }))
     .filter((c) => c.count > 0)
     .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
 
   const countOf = new Map(counts.map((c) => [c.category, c.count]));
+  const pointsOf = new Map(counts.map((c) => [c.category, c.points]));
   const rank = new Map(counts.map((c, i) => [c.category, i]));
   const sub = parseJSON<Submission>(rawMine);
 
@@ -86,6 +95,7 @@ export async function buildResults(store: Store, keys: GameKeys, forEmail?: stri
         answers: sub.answers.map((a) => ({
           ...a,
           count: countOf.get(a.category) ?? 0,
+          points: pointsOf.get(a.category) ?? 0,
           onBoard: (rank.get(a.category) ?? Infinity) < BOARD_SIZE,
         })),
       }

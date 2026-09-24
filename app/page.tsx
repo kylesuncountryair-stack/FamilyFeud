@@ -4,13 +4,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
 
 type Question = { day: string; questionId: string; prompt: string };
-type MyAnswer = { raw: string; category: string; count: number; onBoard: boolean };
+type MyAnswer = { raw: string; category: string; count: number; points: number; onBoard: boolean };
 type Results = {
-  top: { category: string; count: number }[];
+  top: { category: string; count: number; points: number }[];
   players: number;
   mine: { name: string; answers: MyAnswer[] } | null;
 };
-type Stage = "loading" | "name" | "play" | "reveal" | "results";
+type Stage = "loading" | "name" | "play" | "reveal" | "results" | "history" | "past";
+type PastDay = {
+  day: string;
+  questionId: string;
+  prompt: string;
+  players: number;
+  top: { category: string; points: number } | null;
+};
+type PastBoard = Results & { day: string; questionId: string; prompt: string };
 
 const EMAIL_KEY = "survey-says:email";
 const BOARD_SLOTS = 8;
@@ -26,6 +34,38 @@ export default function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const firstInput = useRef<HTMLInputElement>(null);
+  const [returnTo, setReturnTo] = useState<Stage>("name");
+  const [pastDays, setPastDays] = useState<PastDay[] | null>(null);
+  const [pastBoard, setPastBoard] = useState<PastBoard | null>(null);
+  const [historyError, setHistoryError] = useState("");
+
+  async function openHistory() {
+    if (stage !== "history" && stage !== "past") setReturnTo(stage === "reveal" ? "play" : stage);
+    setStage("history");
+    setHistoryError("");
+    try {
+      const res = await fetch("/api/history", { cache: "no-store" });
+      if (!res.ok) throw new Error();
+      setPastDays((await res.json()).days);
+    } catch {
+      setHistoryError("Past boards didn't load. Try again in a moment.");
+    }
+  }
+
+  async function openPastBoard(d: PastDay) {
+    setPastBoard(null);
+    setStage("past");
+    setHistoryError("");
+    try {
+      const qs = new URLSearchParams({ day: d.day, questionId: d.questionId });
+      if (player) qs.set("email", player);
+      const res = await fetch(`/api/history/board?${qs}`, { cache: "no-store" });
+      if (!res.ok) throw new Error();
+      setPastBoard(await res.json());
+    } catch {
+      setHistoryError("That board didn't load. Try again in a moment.");
+    }
+  }
 
   const fetchResults = useCallback(async (who: string): Promise<Results> => {
     const res = await fetch(`/api/results?email=${encodeURIComponent(who)}`, { cache: "no-store" });
@@ -130,7 +170,13 @@ export default function Home() {
         <h1 className="brand">
           <img className="logo" src="/logo.png" alt="Survey Says" />
         </h1>
-        {player && stage !== "name" && (
+        <nav className="nav">
+          {stage !== "loading" && stage !== "history" && stage !== "past" && (
+            <button className="nav-btn" onClick={openHistory}>
+              Past boards
+            </button>
+          )}
+          {player && stage !== "name" && (
           <span className="player">
             Playing as <strong>{firstNameFromEmail(player)}</strong>{" "}
             <button
@@ -149,7 +195,8 @@ export default function Home() {
               Not you?
             </button>
           </span>
-        )}
+          )}
+        </nav>
       </header>
 
       {stage === "loading" && <p className="sub">Loading today&rsquo;s question…</p>}
@@ -238,7 +285,157 @@ export default function Home() {
       {stage === "results" && results && question && (
         <ResultsView question={question} results={results} onRefresh={() => fetchResults(player)} />
       )}
+
+      {stage === "history" && (
+        <section className="history">
+          <button className="back" onClick={() => setStage(returnTo)}>
+            ← Back to today&rsquo;s question
+          </button>
+          <h2 className="section-title">Past boards</h2>
+          <p className="sub left">See how each question ended up once the day was over.</p>
+          {historyError && <p className="error">{historyError}</p>}
+          {!pastDays && !historyError && <p className="hint left">Loading…</p>}
+          {pastDays?.length === 0 && (
+            <p className="empty">No finished boards yet. Check back tomorrow to see how today&rsquo;s question ends up.</p>
+          )}
+          {pastDays && pastDays.length > 0 && (
+            <ul className="history-list">
+              {pastDays.map((d) => (
+                <li key={`${d.day}|${d.questionId}`}>
+                  <button className="history-item" onClick={() => openPastBoard(d)}>
+                    <span className="h-date">{formatDay(d.day)}</span>
+                    <span className="h-prompt">{d.prompt}</span>
+                    <span className="h-meta">
+                      {d.top ? (
+                        <>
+                          Top answer: <strong>{d.top.category}</strong> ({d.top.points})
+                          {" · "}
+                        </>
+                      ) : null}
+                      {d.players} {d.players === 1 ? "player" : "players"}
+                    </span>
+                    <span className="h-arrow" aria-hidden>
+                      →
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {stage === "past" && (
+        <>
+          <div className="back-row">
+            <button className="back" onClick={() => setStage("history")}>
+              ← All past boards
+            </button>
+            <button className="back" onClick={() => setStage(returnTo)}>
+              Today&rsquo;s question →
+            </button>
+          </div>
+          {historyError && <p className="error">{historyError}</p>}
+          {!pastBoard && !historyError && <p className="hint">Loading…</p>}
+          {pastBoard && (
+            <>
+              <p className="board-date">Final board · {formatDay(pastBoard.day)}</p>
+              <Board prompt={pastBoard.prompt} results={pastBoard} />
+              <p className="meta">
+                {pastBoard.players} {pastBoard.players === 1 ? "player" : "players"} answered. Points are the percentage
+                of players who gave each answer.
+              </p>
+              {pastBoard.mine ? (
+                <YourAnswers results={pastBoard} final />
+              ) : player ? (
+                <p className="empty">You didn&rsquo;t play this day.</p>
+              ) : null}
+            </>
+          )}
+        </>
+      )}
     </main>
+  );
+}
+
+function formatDay(day: string) {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function scoreOf(results: Results) {
+  if (!results.mine) return 0;
+  const onBoard = results.mine.answers.filter((a) => a.onBoard).map((a) => [a.category, a.points] as const);
+  return [...new Map(onBoard).values()].reduce((s, n) => s + n, 0);
+}
+
+function Board({ prompt, results }: { prompt: string; results: Results }) {
+  const myGroups = new Set(results.mine?.answers.map((a) => a.category));
+  const slots = Array.from({ length: BOARD_SLOTS }, (_, i) => results.top[i] ?? null);
+  return (
+    <section className="board" aria-label="Top answers">
+      <h2 className="prompt">{prompt}</h2>
+      <div className="tiles two-col flip">
+        {slots.map((slot, i) =>
+          slot ? (
+            <div
+              key={i}
+              className={`tile ${myGroups.has(slot.category) ? "yours" : ""}`}
+              style={{ animationDelay: `${i * 180}ms` }}
+            >
+              <span className="badge" aria-hidden>
+                {i + 1}
+              </span>
+              <span className="answer">{slot.category}</span>
+              <span
+                className="count"
+                aria-label={`${slot.points} points: ${slot.count} of ${results.players} players`}
+                title={`${slot.count} of ${results.players} players`}
+              >
+                {slot.points}
+              </span>
+            </div>
+          ) : (
+            <div key={i} className="tile empty" aria-hidden />
+          )
+        )}
+      </div>
+    </section>
+  );
+}
+
+function YourAnswers({ results, final = false }: { results: Results; final?: boolean }) {
+  const mine = results.mine;
+  if (!mine) return null;
+  return (
+    <section className="yours-panel">
+      <h2>Your answers, {mine.name}</h2>
+      {mine.answers.map((a, i) => {
+        const dupe = mine.answers.findIndex((b) => b.category === a.category) !== i;
+        return (
+          <div className="your-row" key={i}>
+            <span className="your-raw">{a.raw}</span>
+            <span className={`pts ${a.onBoard ? "" : "miss"}`}>{dupe ? "—" : a.onBoard ? `+${a.points}` : "✕"}</span>
+            <span className="your-group">
+              {dupe
+                ? `Same group as another answer (${a.category}), counted once`
+                : a.onBoard
+                  ? `Counted as “${a.category}” · ${a.count} of ${results.players} ${results.players === 1 ? "player" : "players"}`
+                  : `Counted as “${a.category}”, ${final ? "didn’t make the board" : "not on the board yet"}`}
+            </span>
+          </div>
+        );
+      })}
+      <div className="score-line">
+        <span>{final ? "Final score" : "Your score"}</span>
+        <span>{scoreOf(results)}</span>
+      </div>
+    </section>
   );
 }
 
@@ -251,77 +448,17 @@ function ResultsView({
   results: Results;
   onRefresh: () => void;
 }) {
-  const myGroups = new Set(results.mine?.answers.map((a) => a.category));
-  const slots = Array.from({ length: BOARD_SLOTS }, (_, i) => results.top[i] ?? null);
-  const score = results.mine
-    ? [...new Map(results.mine.answers.filter((a) => a.onBoard).map((a) => [a.category, a.count])).values()].reduce(
-        (s, n) => s + n,
-        0
-      )
-    : 0;
-
   return (
     <>
-      <section className="board" aria-label="Today's top answers">
-        <h2 className="prompt">{question.prompt}</h2>
-        <div className="tiles two-col flip">
-          {slots.map((slot, i) =>
-            slot ? (
-              <div
-                key={i}
-                className={`tile ${myGroups.has(slot.category) ? "yours" : ""}`}
-                style={{ animationDelay: `${i * 180}ms` }}
-              >
-                <span className="badge" aria-hidden>
-                  {i + 1}
-                </span>
-                <span className="answer">{slot.category}</span>
-                <span className="count" aria-label={`${slot.count} players`}>
-                  {slot.count}
-                </span>
-              </div>
-            ) : (
-              <div key={i} className="tile empty" aria-hidden />
-            )
-          )}
-        </div>
-      </section>
-
+      <Board prompt={question.prompt} results={results} />
       <p className="meta">
-        {results.players} {results.players === 1 ? "player has" : "players have"} answered today. The board updates
-        as more people play.{" "}
+        {results.players} {results.players === 1 ? "player has" : "players have"} answered today. Points are the percentage of
+        players who gave each answer, so they&rsquo;re fair no matter when you play.{" "}
         <button className="link" onClick={onRefresh}>
           Refresh now
         </button>
       </p>
-
-      {results.mine && (
-        <section className="yours-panel">
-          <h2>Your answers, {results.mine.name}</h2>
-          {results.mine.answers.map((a, i) => {
-            const dupe = results.mine!.answers.findIndex((b) => b.category === a.category) !== i;
-            return (
-              <div className="your-row" key={i}>
-                <span className="your-raw">{a.raw}</span>
-                <span className={`pts ${a.onBoard ? "" : "miss"}`}>
-                  {dupe ? "—" : a.onBoard ? `+${a.count}` : "✕"}
-                </span>
-                <span className="your-group">
-                  {dupe
-                    ? `Same group as another answer (${a.category}), counted once`
-                    : a.onBoard
-                      ? `Counted as “${a.category}”`
-                      : `Counted as “${a.category}”, not on the board yet`}
-                </span>
-              </div>
-            );
-          })}
-          <div className="score-line">
-            <span>Your score</span>
-            <span>{score}</span>
-          </div>
-        </section>
-      )}
+      <YourAnswers results={results} />
     </>
   );
 }

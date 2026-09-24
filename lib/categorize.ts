@@ -102,6 +102,23 @@ export async function categorize(
   if (pending.length) {
     const existing = Object.keys(await store.hgetall(keys.counts));
     const known = [...new Set([...Object.keys(question.groups ?? {}), ...existing])];
+
+    // Same word as an existing group, ignoring plurals/case ("Blankets" -> "Blanket"): no AI needed
+    const knownByNorm = new Map(known.map((g) => [normalize(g), g]));
+    for (let j = pending.length - 1; j >= 0; j--) {
+      const i = pending[j];
+      const match = knownByNorm.get(norms[i]);
+      if (match) {
+        out[i] = match;
+        toCache[norms[i]] = match;
+        pending.splice(j, 1);
+      }
+    }
+  }
+
+  if (pending.length) {
+    const existing = Object.keys(await store.hgetall(keys.counts));
+    const known = [...new Set([...Object.keys(question.groups ?? {}), ...existing])];
     const ai = await aiGroup(question.prompt, pending.map((i) => raws[i]), known);
 
     pending.forEach((i, j) => {
