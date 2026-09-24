@@ -10,8 +10,8 @@
   --ink: #ffffff;
   --ink-soft: #b9c7f5;
   --strike: #e2323a;
-  --display: "Anton", "Impact", "Arial Narrow Bold", sans-serif;
-  --body: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --display: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -41,28 +41,27 @@ body {
 .masthead {
   width: 100%;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 14px;
   border-bottom: 1px solid #1d3a96;
 }
-.wordmark {
-  font-family: var(--display);
-  font-weight: 400;
-  font-size: 32px;
-  line-height: 1;
-  letter-spacing: 0.01em;
-  margin: 0;
-  color: var(--ink);
+.brand { margin: 0; line-height: 0; }
+.logo {
+  display: block;
+  height: 52px;
+  width: auto;
+  max-width: min(320px, 60vw);
+  object-fit: contain;
 }
+@media (max-width: 640px) { .logo { height: 38px; } }
 .player { color: var(--ink-soft); font-size: 17px; text-align: right; }
 .player strong { color: var(--ink); font-weight: 600; }
 
 .intro {
-  font-family: var(--display);
-  font-weight: 400;
-  font-size: clamp(30px, 5vw, 44px);
+font-weight: 700;   font-family: var(--display);
+  font-size: clamp(26px, 4.4vw, 38px);
   line-height: 1.1;
   margin: 12px 0 0;
   text-align: center;
@@ -96,9 +95,10 @@ body {
 }
 
 .prompt {
-  font-family: var(--display);
-  font-size: clamp(26px, 4.4vw, 42px);
-  line-height: 1.1;
+font-weight: 800;   font-family: var(--display);
+  font-size: clamp(24px, 3.8vw, 36px);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
   text-align: center;
   margin: 0 0 22px;
   text-wrap: balance;
@@ -125,7 +125,7 @@ body {
 .tile.empty { background: var(--tile-empty); box-shadow: inset 0 0 0 2px #17328a; }
 
 .badge {
-  flex: none;
+font-weight: 800;   flex: none;
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -138,14 +138,14 @@ body {
 }
 
 .tile input {
-  flex: 1;
+font-weight: 700;   flex: 1;
   min-width: 0;
   background: transparent;
   border: none;
   border-bottom: 2px solid rgba(255, 255, 255, 0.35);
   color: var(--ink);
   font-family: var(--display);
-  font-size: 26px;
+  font-size: 22px;
   padding: 6px 2px;
 }
 .tile input::placeholder { color: rgba(255, 255, 255, 0.4); }
@@ -157,9 +157,9 @@ body {
 .tile.locked .badge { background: var(--studio); color: var(--bulb); }
 
 /* results tiles */
-.answer { flex: 1; font-family: var(--display); font-size: 24px; line-height: 1.1; }
+.answer { font-weight: 700; flex: 1; font-family: var(--display); font-size: 24px; line-height: 1.1; }
 .count {
-  flex: none;
+font-weight: 800;   flex: none;
   min-width: 56px;
   text-align: center;
   font-family: var(--display);
@@ -178,19 +178,43 @@ body {
 
 /* ---------- Controls ---------- */
 .btn {
+  font-weight: 700;
   font-family: var(--display);
-  font-size: 24px;
-  letter-spacing: 0.02em;
+  font-size: 20px;
+  letter-spacing: 0.01em;
   color: var(--studio);
   background: linear-gradient(#ffd54a, var(--frame));
   border: none;
   border-radius: 999px;
   padding: 14px 40px;
   cursor: pointer;
-  box-shadow: 0 5px 0 var(--frame-dark);
-  transition: transform 0.08s, box-shadow 0.08s;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 5px 0 var(--frame-dark), 0 8px 18px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
-.btn:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 1px 0 var(--frame-dark); }
+/* light sweep on hover */
+.btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.55) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.5s ease;
+  pointer-events: none;
+}
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.07);
+  box-shadow: 0 7px 0 var(--frame-dark), 0 14px 26px rgba(255, 190, 0, 0.3);
+}
+.btn:hover:not(:disabled)::after { transform: translateX(120%); }
+.btn:active:not(:disabled) {
+  transform: translateY(4px);
+  filter: brightness(0.95);
+  box-shadow: 0 1px 0 var(--frame-dark), 0 3px 8px rgba(0, 0, 0, 0.3);
+  transition-duration: 0.05s;
+}
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn:focus-visible, .link:focus-visible { outline: 3px solid var(--bulb); outline-offset: 4px; }
 
@@ -200,8 +224,14 @@ body {
   color: var(--ink-soft);
   font: inherit;
   text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 4px;
+  transition: color 0.15s ease, background 0.15s ease;
 }
+.link:hover { color: var(--bulb); background: rgba(255, 255, 255, 0.08); }
+.link:active { background: rgba(255, 255, 255, 0.16); }
 
 .name-card { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 14px; }
 .name-card label { font-weight: 600; }
@@ -221,7 +251,7 @@ body {
 .hint { color: var(--ink-soft); margin: 0; text-align: center; font-size: 16px; }
 
 .survey-says {
-  font-family: var(--display);
+font-weight: 800;   font-family: var(--display);
   font-size: 34px;
   color: var(--bulb);
   text-align: center;
@@ -237,7 +267,7 @@ body {
   border-radius: 14px;
   padding: 20px 22px;
 }
-.yours-panel h2 { font-family: var(--display); font-weight: 400; font-size: 28px; margin: 0 0 12px; }
+.yours-panel h2 { font-weight: 700; font-family: var(--display); font-size: 28px; margin: 0 0 12px; }
 .your-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -248,10 +278,10 @@ body {
 .your-row:first-of-type { border-top: none; }
 .your-raw { font-weight: 700; font-size: 20px; }
 .your-group { color: var(--ink-soft); font-size: 16px; }
-.pts { grid-row: span 2; align-self: center; font-family: var(--display); font-size: 28px; }
+.pts { font-weight: 800; grid-row: span 2; align-self: center; font-family: var(--display); font-size: 28px; }
 .pts.miss { color: var(--strike); }
 .score-line {
-  display: flex;
+font-weight: 800;   display: flex;
   justify-content: space-between;
   align-items: baseline;
   margin-top: 12px;
@@ -264,4 +294,6 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .flip .tile, .survey-says { animation: none; }
+  .btn, .btn::after { transition: none; }
+  .btn:hover:not(:disabled) { transform: none; }
 }

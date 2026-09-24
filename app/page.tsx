@@ -35,22 +35,29 @@ export default function Home() {
     return data;
   }, []);
 
-  // Load today's question + remembered name
+  // Load today's question. Returning players on this device skip the email screen.
   useEffect(() => {
+    let saved = "";
     try {
-      const saved = localStorage.getItem(EMAIL_KEY);
-      if (saved) setEmail(saved);
+      saved = localStorage.getItem(EMAIL_KEY) ?? "";
     } catch {}
+    if (saved) setEmail(saved);
+
     fetch("/api/question", { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("question");
+        return r.json();
+      })
       .then((q: Question) => {
         setQuestion(q);
-        setStage("name");
+        if (isValidEmail(saved)) signIn(normalizeEmail(saved));
+        else setStage("name");
       })
       .catch(() => {
         setError("Today's question didn't load. Refresh the page to try again.");
         setStage("name");
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -64,10 +71,14 @@ export default function Home() {
     return () => clearInterval(id);
   }, [stage, player, fetchResults]);
 
-  async function start() {
+  function start() {
     const who = normalizeEmail(email);
     if (!isValidEmail(who)) return setError(`Enter your @${EMAIL_DOMAIN} email address.`);
     setError("");
+    signIn(who);
+  }
+
+  async function signIn(who: string) {
     setBusy(true);
     setPlayer(who);
     try {
@@ -116,13 +127,19 @@ export default function Home() {
   return (
     <main className="stage">
       <header className="masthead">
-        <h1 className="wordmark">Survey Says</h1>
+        <h1 className="brand">
+          <img className="logo" src="/logo.png" alt="Survey Says" />
+        </h1>
         {player && stage !== "name" && (
           <span className="player">
             Playing as <strong>{firstNameFromEmail(player)}</strong>{" "}
             <button
               className="link"
               onClick={() => {
+                try {
+                  localStorage.removeItem(EMAIL_KEY);
+                } catch {}
+                setEmail("");
                 setPlayer("");
                 setResults(null);
                 setAnswers(["", "", ""]);
@@ -139,8 +156,8 @@ export default function Home() {
 
       {stage === "name" && (
         <>
-          <h2 className="intro">One survey question a day. Give your top three answers.</h2>
-          <p className="sub">Then see how the rest of the team answered.</p>
+          <h2 className="intro">A new survey question every&nbsp;day. Give your top three answers.</h2>
+          <p className="sub">Then see how the rest of the team answered. We&rsquo;ll remember you on this device, so next time you&rsquo;ll go straight to the question.</p>
           <form
             className="name-card"
             onSubmit={(e) => {
