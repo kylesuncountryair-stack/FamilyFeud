@@ -18,3 +18,10 @@ export function firstNameFromEmail(email: string) {
     .map((part) => (part.length > 1 || /[a-z]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part))
     .join("");
 }
+
+/** "mike.smith@suncountry.com" -> "Mike S." (tells two Mikes apart on the leaderboard) */
+export function displayName(email: string) {
+  const parts = normalizeEmail(email).split("@")[0].split(/[._]/).filter(Boolean);
+  const initial = parts[1]?.[0]?.toUpperCase();
+  return initial ? `${firstNameFromEmail(email)} ${initial}.` : firstNameFromEmail(email);
+}

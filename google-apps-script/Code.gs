@@ -50,10 +50,18 @@ function doPost(e) {
       sheet.appendRow([
         new Date(data.timestamp), data.day, data.email, data.firstName, data.question, ...cells,
       ]);
+      // Report exactly where the row went, so the game can confirm it
+      return json({
+        ok: true,
+        logged: true,
+        spreadsheet: ss.getName(),
+        url: ss.getUrl(),
+        tab: sheet.getName(),
+        row: sheet.getLastRow(),
+      });
     } finally {
       lock.releaseLock();
     }
-    return json({ ok: true });
   } catch (err) {
     return json({ ok: false, error: String(err) });
   }
@@ -61,7 +69,7 @@ function doPost(e) {
 
 /** Open the /exec URL in a browser to check the deployment is reachable. */
 function doGet() {
-  return json({ ok: true, message: "Survey Says logger is running. Rows arrive via POST from the game." });
+  return json({ ok: true, get: true, message: "Survey Says logger is running. Rows arrive via POST from the game." });
 }
 
 function json(obj) {

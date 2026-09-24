@@ -12,7 +12,13 @@ the day's survey question, lock them in, and see the team's top answers on the b
    matches are outlined in gold, and they score the player count for each of their
    answers that made the board. The board refreshes every 15 seconds.
 
-Each email can play once per day. Every play is logged to a Google Sheet (see below). A new question rotates in at midnight (`GAME_TIMEZONE`).
+Each email can play once per day. **Leaderboard** (link in the header, and the points pill next to the player's name)
+ranks everyone by total points for the week, Monday to Sunday, with last week one tap away.
+Totals are recalculated from each day's latest board, so the same answers always earn the
+same points whether someone played early or late. Names show as first name + last initial.
+**Past boards** (link in the header) shows the
+final board for every finished day, plus the player's own answers and score if they
+played. Today's board never appears there, so nobody can peek before playing. Every play is logged to a Google Sheet (see below). A new question rotates in at midnight (`GAME_TIMEZONE`).
 
 ## How answers get grouped
 
@@ -23,6 +29,15 @@ Free-form answers go through this pipeline, in order:
 3. **Claude** (if `ANTHROPIC_API_KEY` is set): puts the answer in an existing group
    or creates a broad new one. Typos and near-synonyms are handled here.
 4. **Fallback**: the answer becomes its own group.
+
+5. **Board cleanup**: whenever a play creates a new group, Claude looks at the whole
+   board and merges groups that mean the same thing ("Advil" into "Medication",
+   "Magazine" + "Readers digest" into "Reading material"). This runs after the player
+   sees their results, so nobody waits on it.
+
+To tidy a board yourself (for example, answers from before the Claude key was added),
+open `/api/admin/regroup?key=YOUR_ADMIN_KEY` in a browser. It shows what it merged and
+every group with the answers in it.
 
 A player counts once per group, so "socks" + "shirts" from one person = 1 vote for Clothes.
 
@@ -77,6 +92,21 @@ npm install
 cp .env.example .env.local   # fill in what you have
 npm run dev
 ```
+
+## One-week event
+
+Set `GAME_START` in Vercel to the Monday the event begins (e.g. `2026-09-28`), then redeploy.
+
+- **Monday–Sunday:** one question per day, using the first 7 questions in
+  `lib/questions.ts` in order (first question = Monday).
+- **The following Monday (catch-up day):** no new question. Players can answer the Saturday
+  and Sunday questions they missed; their points count toward the week.
+- **After that:** the game shows "That's a wrap!" with the final standings and Past boards.
+- Before `GAME_START`, players see when the game starts.
+
+The leaderboard covers exactly the event week, and Past boards only shows event days, so
+anything from testing beforehand stays out of the results. Leave `GAME_START` unset to keep
+running a new question every day.
 
 ## Editing questions
 

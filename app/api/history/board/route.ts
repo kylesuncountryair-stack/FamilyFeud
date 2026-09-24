@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { buildResults, gameKeys, getToday } from "@/lib/game";
+import { buildResults, gameKeys } from "@/lib/game";
+import { isFinished } from "@/lib/schedule";
 import { lookupPrompt } from "@/lib/history";
 import { getStore } from "@/lib/store";
 
@@ -13,8 +14,8 @@ export async function GET(req: Request) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[a-z0-9-]{1,80}$/i.test(questionId)) {
     return NextResponse.json({ error: "Unknown board." }, { status: 400 });
   }
-  if (day >= getToday().day) {
-    return NextResponse.json({ error: "Today's board isn't finished yet." }, { status: 400 });
+  if (!isFinished(day)) {
+    return NextResponse.json({ error: "That board isn't finished yet." }, { status: 400 });
   }
 
   const store = getStore();

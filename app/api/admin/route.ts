@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { gameKeys, getToday, type Submission } from "@/lib/game";
+import { getSchedule, questionOn } from "@/lib/schedule";
 import { mergeGroups } from "@/lib/consolidate";
 import { getStore, parseJSON } from "@/lib/store";
 
@@ -12,8 +13,11 @@ function authorized(req: Request) {
 
 function resolveKeys(url: string) {
   const p = new URL(url).searchParams;
-  const today = getToday();
-  return gameKeys(p.get("day") ?? today.day, p.get("questionId") ?? today.question.id);
+  const day = p.get("day");
+  if (day) return gameKeys(day, p.get("questionId") ?? questionOn(day).id);
+  const open = getSchedule().open[0];
+  const today = getToday().day;
+  return open ? gameKeys(open.day, open.question.id) : gameKeys(today, questionOn(today).id);
 }
 
 /** GET: every group with the raw answers that landed in it. */

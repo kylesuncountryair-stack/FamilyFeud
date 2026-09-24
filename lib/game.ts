@@ -75,15 +75,8 @@ export async function buildResults(store: Store, keys: GameKeys, forEmail?: stri
     forEmail ? store.hget(keys.subs, playerKey(forEmail)) : Promise.resolve(null),
   ]);
 
-  // Points = % of today's players who gave that answer, like "we surveyed 100 people".
-  // Unlike raw counts, this doesn't grow as more people play, so early players aren't penalized.
-  const pct = (n: number) => (players > 0 ? Math.round((n / players) * 100) : 0);
-
-  const counts = Object.entries(rawCounts)
-    .map(([category, n]) => ({ category, count: Number(n), points: pct(Number(n)) }))
-    .filter((c) => c.count > 0)
-    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
-
+  const board = rankBoard(rawCounts, players);
+  const counts = board.list;
   const countOf = new Map(counts.map((c) => [c.category, c.count]));
   const pointsOf = new Map(counts.map((c) => [c.category, c.points]));
   const rank = new Map(counts.map((c, i) => [c.category, i]));
@@ -102,6 +95,26 @@ export async function buildResults(store: Store, keys: GameKeys, forEmail?: stri
     : null;
 
   return { top: counts.slice(0, BOARD_SIZE), players, mine };
+}
+
+/**
+ * The one scoring rule, used by today's results, past boards and the leaderboard.
+ * Points = % of that day's players who gave the answer ("we surveyed 100 people"),
+ * so scores don't grow just because more people played.
+ */
+export function rankBoard(rawCounts: Record<string, unknown>, players: number) {
+  const pct = (n: number) => (players > 0 ? Math.round((n / players) * 100) : 0);
+  const list = Object.entries(rawCounts)
+    .map(([category, n]) => ({ category, count: Number(n), points: pct(Number(n)) }))
+    .filter((c) => c.count > 0)
+    .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+  const onBoard = new Map(list.slice(0, BOARD_SIZE).map((c) => [c.category, c.points]));
+  return { list, onBoard };
+}
+
+/** A player's score for a day: points for each distinct group of theirs that made the board. */
+export function scoreSubmission(sub: Submission, onBoard: Map<string, number>) {
+  return [...new Set(sub.answers.map((a) => a.category))].reduce((sum, g) => sum + (onBoard.get(g) ?? 0), 0);
 }
 
 /** Recompute group counts from submissions (used after an admin merge). */

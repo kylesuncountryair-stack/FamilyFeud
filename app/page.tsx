@@ -3,14 +3,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
 
-type Question = { day: string; questionId: string; prompt: string };
+type Question = { day: string; questionId: string; prompt: string; label?: string };
+type Schedule = {
+  status: "daily" | "before" | "live" | "catchup" | "over";
+  today: string;
+  event: { start: string; end: string; catchUp: string } | null;
+  open: Question[];
+};
+const gameKey = (q: Question) => `${q.day}|${q.questionId}`;
 type MyAnswer = { raw: string; category: string; count: number; points: number; onBoard: boolean };
 type Results = {
   top: { category: string; count: number; points: number }[];
   players: number;
   mine: { name: string; answers: MyAnswer[] } | null;
 };
-type Stage = "loading" | "name" | "play" | "reveal" | "results" | "history" | "past";
+type Stage = "loading" | "name" | "pick" | "closed" | "play" | "reveal" | "results" | "history" | "past" | "leaderboard";
+type Leader = { rank: number; name: string; total: number; days: number; isMe: boolean };
+type Leaderboard = {
+  event?: boolean;
+  week: { start: string; end: string };
+  daysInWeek: number;
+  leaders: Leader[];
+  me: Leader | null;
+};
+const SIDE_STAGES: Stage[] = ["history", "past", "leaderboard"];
 type PastDay = {
   day: string;
   questionId: string;
@@ -26,6 +42,8 @@ const POLL_MS = 15_000;
 
 export default function Home() {
   const [question, setQuestion] = useState<Question | null>(null);
+  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [played, setPlayed] = useState<Record<string, Results>>({});
   const [stage, setStage] = useState<Stage>("loading");
   const [email, setEmail] = useState("");
   const [player, setPlayer] = useState(""); // signed-in email
@@ -38,9 +56,46 @@ export default function Home() {
   const [pastDays, setPastDays] = useState<PastDay[] | null>(null);
   const [pastBoard, setPastBoard] = useState<PastBoard | null>(null);
   const [historyError, setHistoryError] = useState("");
+  const [weekTotal, setWeekTotal] = useState<number | null>(null);
+  const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
+  const [lbWeek, setLbWeek] = useState(0);
+  const [lbError, setLbError] = useState("");
+
+  const refreshWeekTotal = useCallback(async (who: string) => {
+    if (!who) return;
+    try {
+      const res = await fetch(`/api/leaderboard?week=0&email=${encodeURIComponent(who)}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data: Leaderboard = await res.json();
+      setWeekTotal(data.me?.total ?? 0);
+    } catch {}
+  }, []);
+
+  function rememberReturn() {
+    if (!SIDE_STAGES.includes(stage)) setReturnTo(stage === "reveal" ? "play" : stage);
+  }
+
+  async function openLeaderboard(week = lbWeek) {
+    rememberReturn();
+    setStage("leaderboard");
+    setLbWeek(week);
+    setLbError("");
+    setLeaderboard(null);
+    try {
+      const qs = new URLSearchParams({ week: String(week) });
+      if (player) qs.set("email", player);
+      const res = await fetch(`/api/leaderboard?${qs}`, { cache: "no-store" });
+      if (!res.ok) throw new Error();
+      const data: Leaderboard = await res.json();
+      setLeaderboard(data);
+      if (week === 0 && player) setWeekTotal(data.me?.total ?? 0);
+    } catch {
+      setLbError("The leaderboard didn't load. Try again in a moment.");
+    }
+  }
 
   async function openHistory() {
-    if (stage !== "history" && stage !== "past") setReturnTo(stage === "reveal" ? "play" : stage);
+    rememberReturn();
     setStage("history");
     setHistoryError("");
     try {
@@ -67,13 +122,30 @@ export default function Home() {
     }
   }
 
-  const fetchResults = useCallback(async (who: string): Promise<Results> => {
-    const res = await fetch(`/api/results?email=${encodeURIComponent(who)}`, { cache: "no-store" });
+  const fetchResults = useCallback(async (who: string, q: Question, show = true): Promise<Results> => {
+    const qs = new URLSearchParams({ day: q.day, questionId: q.questionId });
+    if (who) qs.set("email", who);
+    const res = await fetch(`/api/results?${qs}`, { cache: "no-store" });
     if (!res.ok) throw new Error("results");
     const data: Results = await res.json();
-    setResults(data);
+    if (show) setResults(data);
+    setPlayed((prev) => ({ ...prev, [gameKey(q)]: data }));
     return data;
   }, []);
+
+  /** Open one of today's questions: its results if already played, otherwise the answer board. */
+  function openGame(q: Question) {
+    setQuestion(q);
+    setError("");
+    setAnswers(["", "", ""]);
+    const r = played[gameKey(q)];
+    if (r?.mine) {
+      setResults(r);
+      setStage("results");
+    } else {
+      setStage("play");
+    }
+  }
 
   // Load today's question. Returning players on this device skip the email screen.
   useEffect(() => {
@@ -88,9 +160,20 @@ export default function Home() {
         if (!r.ok) throw new Error("question");
         return r.json();
       })
-      .then((q: Question) => {
-        setQuestion(q);
-        if (isValidEmail(saved)) signIn(normalizeEmail(saved));
+      .then((s: Schedule) => {
+        setSchedule(s);
+        const who = isValidEmail(saved) ? normalizeEmail(saved) : "";
+        if (!s.open.length) {
+          // Before the event starts, or after it ends
+          if (who) {
+            setPlayer(who);
+            refreshWeekTotal(who);
+          }
+          setStage("closed");
+          return;
+        }
+        setQuestion(s.open[0]);
+        if (who) signIn(who, s);
         else setStage("name");
       })
       .catch(() => {
@@ -107,9 +190,12 @@ export default function Home() {
   // Keep the board fresh while people are still playing
   useEffect(() => {
     if (stage !== "results") return;
-    const id = setInterval(() => fetchResults(player).catch(() => {}), POLL_MS);
+    const id = setInterval(() => {
+      if (question) fetchResults(player, question).catch(() => {});
+      refreshWeekTotal(player);
+    }, POLL_MS);
     return () => clearInterval(id);
-  }, [stage, player, fetchResults]);
+  }, [stage, player, question, fetchResults, refreshWeekTotal]);
 
   function start() {
     const who = normalizeEmail(email);
@@ -118,15 +204,24 @@ export default function Home() {
     signIn(who);
   }
 
-  async function signIn(who: string) {
+  async function signIn(who: string, s: Schedule | null = schedule) {
     setBusy(true);
+    refreshWeekTotal(who);
     setPlayer(who);
     try {
       localStorage.setItem(EMAIL_KEY, who);
     } catch {}
+    const open = s?.open ?? [];
     try {
-      const r = await fetchResults(who);
-      setStage(r.mine ? "results" : "play");
+      if (open.length > 1) {
+        // Catch-up day: show the weekend questions with what they've already played
+        await Promise.all(open.map((q) => fetchResults(who, q, false).catch(() => null)));
+        setStage("pick");
+      } else if (open[0]) {
+        setQuestion(open[0]);
+        const r = await fetchResults(who, open[0]);
+        setStage(r.mine ? "results" : "play");
+      }
     } catch {
       setStage("play");
     } finally {
@@ -140,7 +235,7 @@ export default function Home() {
   const canLock = allFilled && !hasDupes && !busy;
 
   async function lockIn() {
-    if (!canLock) return;
+    if (!canLock || !question) return;
     setError("");
     setBusy(true);
     setStage("reveal");
@@ -149,13 +244,15 @@ export default function Home() {
       const res = await fetch("/api/submit", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: player, answers: trimmed }),
+        body: JSON.stringify({ email: player, answers: trimmed, day: question?.day, questionId: question?.questionId }),
       });
       const data = await res.json();
       if (!res.ok && res.status !== 409) throw new Error(data.error || "Your answers didn't save.");
       await minWait;
       setResults(data);
+      if (question) setPlayed((prev) => ({ ...prev, [gameKey(question)]: data }));
       setStage("results");
+      refreshWeekTotal(player);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Your answers didn't save. Try locking in again.");
       setStage("play");
@@ -171,14 +268,28 @@ export default function Home() {
           <img className="logo" src="/logo.png" alt="Survey Says" />
         </h1>
         <nav className="nav">
-          {stage !== "loading" && stage !== "history" && stage !== "past" && (
+          {stage !== "loading" && stage !== "leaderboard" && (schedule?.status !== "before" || player) && (
+            <button className="nav-btn" onClick={() => openLeaderboard(0)}>
+              Leaderboard
+            </button>
+          )}
+          {stage !== "loading" && stage !== "history" && stage !== "past" && schedule?.status !== "before" && (
             <button className="nav-btn" onClick={openHistory}>
               Past boards
             </button>
           )}
           {player && stage !== "name" && (
           <span className="player">
-            Playing as <strong>{firstNameFromEmail(player)}</strong>{" "}
+            Playing as <strong>{firstNameFromEmail(player)}</strong>
+            {weekTotal !== null && (
+              <button
+                className="week-pill"
+                onClick={() => openLeaderboard(0)}
+                title="Your points this week. Click to see the leaderboard."
+              >
+                {weekTotal} pts this week
+              </button>
+            )}{" "}
             <button
               className="link"
               onClick={() => {
@@ -187,9 +298,11 @@ export default function Home() {
                 } catch {}
                 setEmail("");
                 setPlayer("");
+                setWeekTotal(null);
                 setResults(null);
                 setAnswers(["", "", ""]);
-                setStage("name");
+                setPlayed({});
+                setStage(schedule && !schedule.open.length ? "closed" : "name");
               }}
             >
               Not you?
@@ -203,7 +316,11 @@ export default function Home() {
 
       {stage === "name" && (
         <>
-          <h2 className="intro">A new survey question every&nbsp;day. Give your top three answers.</h2>
+          <h2 className="intro">
+            {schedule?.status === "catchup"
+              ? "Catch-up day: answer the weekend questions you missed."
+              : <>A new survey question every&nbsp;day. Give your top three answers.</>}
+          </h2>
           <p className="sub">Then see how the rest of the team answered. We&rsquo;ll remember you on this device, so next time you&rsquo;ll go straight to the question.</p>
           <form
             className="name-card"
@@ -234,6 +351,14 @@ export default function Home() {
 
       {(stage === "play" || stage === "reveal") && question && (
         <>
+          {schedule && schedule.open.length > 1 && (
+            <div className="back-row">
+              <button className="back" onClick={() => setStage("pick")}>
+                ← Weekend questions
+              </button>
+              <p className="board-date">{question.label}</p>
+            </div>
+          )}
           <section className="board" aria-label="Game board">
             <h2 className="prompt">{question.prompt}</h2>
             <div className="tiles">
@@ -283,13 +408,167 @@ export default function Home() {
       )}
 
       {stage === "results" && results && question && (
-        <ResultsView question={question} results={results} onRefresh={() => fetchResults(player)} />
+        <>
+          {schedule && schedule.open.length > 1 && <p className="board-date">{question.label}</p>}
+          <ResultsView question={question} results={results} onRefresh={() => fetchResults(player, question)} />
+          {schedule && schedule.open.length > 1 && (
+            <div className="next-row">
+              {(() => {
+                const next = schedule.open.find((q) => q.day !== question.day && !played[gameKey(q)]?.mine);
+                return next ? (
+                  <button className="btn" onClick={() => openGame(next)}>
+                    Play {next.label} →
+                  </button>
+                ) : (
+                  <p className="hint">You&rsquo;re all caught up. Nice work!</p>
+                );
+              })()}
+              <button className="back" onClick={() => setStage("pick")}>
+                ← Weekend questions
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {stage === "pick" && schedule && (
+        <section className="history">
+          <h2 className="section-title">Catch-up day</h2>
+          <p className="sub left">
+            Don&rsquo;t work weekends? Answer Saturday&rsquo;s and Sunday&rsquo;s questions today. Your points count
+            toward the week, just like everyone else&rsquo;s.
+          </p>
+          <ul className="history-list">
+            {schedule.open.map((q) => {
+              const r = played[gameKey(q)];
+              return (
+                <li key={gameKey(q)}>
+                  <button className="history-item" onClick={() => openGame(q)}>
+                    <span className="h-date">{q.label}</span>
+                    <span className="h-prompt">{q.prompt}</span>
+                    <span className="h-meta">
+                      {r?.mine ? (
+                        <>
+                          Done · <strong>{scoreOf(r)} pts</strong> · see results
+                        </>
+                      ) : (
+                        "Not played yet"
+                      )}
+                    </span>
+                    <span className="h-arrow" aria-hidden>
+                      →
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {stage === "closed" && schedule && (
+        <section className="closed">
+          {schedule.status === "before" && schedule.event ? (
+            <>
+              <h2 className="intro">The game starts {formatDay(schedule.event.start)}.</h2>
+              <p className="sub">
+                A new survey question every day for a week. Give your top three answers, then see how the team
+                answered. Come back then!
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="intro">That&rsquo;s a wrap!</h2>
+              <p className="sub">Thanks for playing. See how everyone finished, or look back at every day&rsquo;s board.</p>
+              <div className="closed-actions">
+                <button className="btn" onClick={() => openLeaderboard(0)}>
+                  See final standings
+                </button>
+                <button className="back" onClick={openHistory}>
+                  Past boards →
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {stage === "leaderboard" && (
+        <section className="history">
+          <button className="back" onClick={() => setStage(returnTo)}>
+            ← Back
+          </button>
+          <div className="lb-head">
+            <h2 className="section-title">Leaderboard</h2>
+            {!leaderboard?.event && (
+            <div className="tabs" role="tablist" aria-label="Week">
+              {["This week", "Last week"].map((label, w) => (
+                <button
+                  key={label}
+                  role="tab"
+                  aria-selected={lbWeek === w}
+                  className={`tab ${lbWeek === w ? "active" : ""}`}
+                  onClick={() => openLeaderboard(w)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            )}
+          </div>
+          {leaderboard && (
+            <p className="sub left">
+              {leaderboard.event && schedule?.status === "over" ? "Final standings · " : ""}
+              {formatShort(leaderboard.week.start)} – {formatShort(leaderboard.week.end)}. Points for each day come from
+              that day&rsquo;s latest board, so everyone who gave the same answers gets the same points, whenever they
+              played.
+              {schedule?.status === "catchup"
+                ? " Weekend points can still shift today while people catch up."
+                : schedule?.status === "over"
+                  ? ""
+                  : lbWeek === 0
+                    ? " Today\u2019s points can still shift until midnight."
+                    : ""}
+            </p>
+          )}
+          {lbError && <p className="error">{lbError}</p>}
+          {!leaderboard && !lbError && <p className="hint left">Loading…</p>}
+          {leaderboard && leaderboard.leaders.length === 0 && (
+            <p className="empty">
+              {lbWeek === 0 ? "No one has played yet this week. Be the first!" : "No one played last week."}
+            </p>
+          )}
+          {leaderboard && leaderboard.leaders.length > 0 && (
+            <div className="lb-table" role="table" aria-label="Leaderboard">
+              <div className="lb-row lb-header" role="row">
+                <span role="columnheader">#</span>
+                <span role="columnheader">Player</span>
+                <span role="columnheader" className="num">Days</span>
+                <span role="columnheader" className="num">Points</span>
+              </div>
+              {leaderboard.leaders.map((l) => (
+                <LeaderRow key={`${l.rank}-${l.name}`} l={l} />
+              ))}
+              {leaderboard.me && !leaderboard.leaders.some((l) => l.isMe) && (
+                <>
+                  <div className="lb-gap" aria-hidden>
+                    ⋯
+                  </div>
+                  <LeaderRow l={leaderboard.me} />
+                </>
+              )}
+            </div>
+          )}
+          {leaderboard && player && !leaderboard.me && leaderboard.leaders.length > 0 && (
+            <p className="hint left">You haven&rsquo;t played {lbWeek === 0 ? "yet this week" : "last week"}.</p>
+          )}
+        </section>
       )}
 
       {stage === "history" && (
         <section className="history">
           <button className="back" onClick={() => setStage(returnTo)}>
-            ← Back to today&rsquo;s question
+            ← Back
           </button>
           <h2 className="section-title">Past boards</h2>
           <p className="sub left">See how each question ended up once the day was over.</p>
@@ -332,7 +611,7 @@ export default function Home() {
               ← All past boards
             </button>
             <button className="back" onClick={() => setStage(returnTo)}>
-              Today&rsquo;s question →
+              Back to the game →
             </button>
           </div>
           {historyError && <p className="error">{historyError}</p>}
@@ -366,6 +645,31 @@ function formatDay(day: string) {
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+function formatShort(day: string) {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function LeaderRow({ l }: { l: Leader }) {
+  return (
+    <div className={`lb-row ${l.isMe ? "me" : ""} ${l.rank <= 3 ? `top top-${l.rank}` : ""}`} role="row">
+      <span className="lb-rank" role="cell">
+        {l.rank}
+      </span>
+      <span className="lb-name" role="cell">
+        {l.name}
+        {l.isMe && <span className="you-tag">You</span>}
+      </span>
+      <span className="num lb-days" role="cell">
+        {l.days}
+      </span>
+      <span className="num lb-total" role="cell">
+        {l.total}
+      </span>
+    </div>
+  );
 }
 
 function scoreOf(results: Results) {
@@ -452,7 +756,8 @@ function ResultsView({
     <>
       <Board prompt={question.prompt} results={results} />
       <p className="meta">
-        {results.players} {results.players === 1 ? "player has" : "players have"} answered today. Points are the percentage of
+        {results.players} {results.players === 1 ? "player has" : "players have"} answered{" "}
+        {question.label && question.label !== "Today’s question" ? "this question" : "today"}. Points are the percentage of
         players who gave each answer, so they&rsquo;re fair no matter when you play.{" "}
         <button className="link" onClick={onRefresh}>
           Refresh now

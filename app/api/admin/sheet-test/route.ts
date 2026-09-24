@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getToday } from "@/lib/game";
+import { questionOn } from "@/lib/schedule";
 import { logPlayToSheet } from "@/lib/sheets";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { day, question } = getToday();
+    const { day } = getToday();
+    const question = questionOn(day);
     const result = await logPlayToSheet({
       timestamp: new Date().toISOString(),
       day,

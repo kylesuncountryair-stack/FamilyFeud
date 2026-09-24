@@ -2,7 +2,8 @@ import { after, NextResponse } from "next/server";
 import { categorize } from "@/lib/categorize";
 import { consolidate } from "@/lib/consolidate";
 import { recordDay } from "@/lib/history";
-import { buildResults, gameKeys, getToday, playerKey, type Submission } from "@/lib/game";
+import { buildResults, gameKeys, playerKey, type Submission } from "@/lib/game";
+import { findOpenGame } from "@/lib/schedule";
 import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
 import { logPlayToSheet } from "@/lib/sheets";
 import { getStore } from "@/lib/store";
@@ -23,7 +24,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Fill in all three answers." }, { status: 400 });
   }
 
-  const { day, question } = getToday();
+  // Normally today's question; on catch-up day, Saturday's or Sunday's
+  const game = findOpenGame(body?.day, body?.questionId);
+  if (!game) {
+    return NextResponse.json({ error: "That question isn't open anymore. Refresh the page." }, { status: 409 });
+  }
+  const { day, question } = game;
   const store = getStore();
   const keys = gameKeys(day, question.id);
   const who = playerKey(email);

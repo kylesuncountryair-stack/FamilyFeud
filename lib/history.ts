@@ -1,6 +1,7 @@
 import type { Question } from "./questions";
 import { QUESTIONS } from "./questions";
-import { gameKeys, questionForDay } from "./game";
+import { gameKeys } from "./game";
+import { questionOn } from "./schedule";
 import { parseJSON, type Store } from "./store";
 
 /** Index of every day that had players: field "YYYY-MM-DD|questionId" -> {"prompt": "..."} */
@@ -23,7 +24,7 @@ async function backfill(store: Store, today: string) {
   const candidates = Array.from({ length: BACKFILL_DAYS }, (_, i) => shiftDay(today, -(i + 1)));
   const found = await Promise.all(
     candidates.map(async (day) => {
-      const q = questionForDay(day);
+      const q = questionOn(day);
       return (await store.hlen(gameKeys(day, q.id).subs)) > 0 ? { day, q } : null;
     })
   );
@@ -40,6 +41,19 @@ export async function lookupPrompt(store: Store, day: string, questionId: string
   return promptFor(await store.hget(HISTORY_KEY, `${day}|${questionId}`), questionId);
 }
 
+/** Every indexed day/question (including today), after a one-time backfill. */
+export async function listIndexedDays(store: Store, today: string) {
+  if (!(await store.hget(HISTORY_KEY, BACKFILL_FLAG))) await backfill(store, today);
+  const index = await store.hgetall(HISTORY_KEY);
+  return Object.entries(index)
+    .filter(([field]) => field !== BACKFILL_FLAG)
+    .map(([field, v]) => {
+      const [day, questionId] = field.split("|");
+      return { day, questionId, prompt: promptFor(v, questionId) };
+    })
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.day) && !!d.questionId);
+}
+
 export type PastDay = {
   day: string;
   questionId: string;
@@ -50,16 +64,8 @@ export type PastDay = {
 
 /** Finished days (today excluded), newest first. */
 export async function listPastDays(store: Store, today: string): Promise<PastDay[]> {
-  if (!(await store.hget(HISTORY_KEY, BACKFILL_FLAG))) await backfill(store, today);
-
-  const index = await store.hgetall(HISTORY_KEY);
-  const days = Object.entries(index)
-    .filter(([field]) => field !== BACKFILL_FLAG)
-    .map(([field, v]) => {
-      const [day, questionId] = field.split("|");
-      return { day, questionId, prompt: promptFor(v, questionId) };
-    })
-    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.day) && d.day < today)
+  const days = (await listIndexedDays(store, today))
+    .filter((d) => d.day < today)
     .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0))
     .slice(0, MAX_LISTED);
 
