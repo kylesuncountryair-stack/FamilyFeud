@@ -54,16 +54,20 @@ export function getSchedule() {
     return { today, status: "daily" as Status, event: null, open: [{ day: today, question: questionOn(today), label: "Today’s question" }] };
   }
   if (today < ev.start) return { today, status: "before" as Status, event: ev, open: [] as OpenGame[] };
+  const label = (day: string) => (day === today ? "Today’s question" : `${weekdayOf(day)}’s question`);
+  const eventDays = Array.from({ length: 7 }, (_, i) => shiftDay(ev.start, i));
   if (today <= ev.end) {
-    return { today, status: "live" as Status, event: ev, open: [{ day: today, question: questionOn(today), label: "Today’s question" }] };
+    // Today's question, plus any earlier day this week for players catching up
+    const open = eventDays
+      .filter((d) => d <= today)
+      .sort((a, b) => (a === today ? -1 : b === today ? 1 : a.localeCompare(b)))
+      .map((day) => ({ day, question: questionOn(day), label: label(day) }));
+    return { today, status: "live" as Status, event: ev, open };
   }
   if (today === ev.catchUp) {
-    return {
-      today,
-      status: "catchup" as Status,
-      event: ev,
-      open: ev.weekendDays.map((day) => ({ day, question: questionOn(day), label: `${weekdayOf(day)}’s question` })),
-    };
+    // Catch-up day: every day of the week is open for anyone who missed it
+    const open = eventDays.map((day) => ({ day, question: questionOn(day), label: label(day) }));
+    return { today, status: "catchup" as Status, event: ev, open };
   }
   return { today, status: "over" as Status, event: ev, open: [] as OpenGame[] };
 }
@@ -75,10 +79,17 @@ export function findOpenGame(day?: string | null, questionId?: string | null) {
   return open.find((g) => g.day === day && (!questionId || g.question.id === questionId)) ?? null;
 }
 
-/** Boards that are finished and safe to show in Past boards. */
-export function isFinished(day: string) {
+/**
+ * Whether a past board can be shown to a player:
+ *  - "hidden": not a past event day (today's board, a future day, or a pre-event test day)
+ *  - "locked": the day can still be caught up on and this player hasn't played it,
+ *              so showing its answers would let them copy the top answers
+ *  - "visible": safe to show
+ */
+export function boardAccess(day: string, hasPlayed: boolean): "hidden" | "locked" | "visible" {
   const s = getSchedule();
-  if (s.open.some((g) => g.day === day)) return false;
-  if (s.event) return day >= s.event.start && day <= s.event.end && day < s.today;
-  return day < s.today;
+  if (day >= s.today) return "hidden";
+  if (s.event && (day < s.event.start || day > s.event.end)) return "hidden";
+  if (s.open.some((g) => g.day === day) && !hasPlayed) return "locked";
+  return "visible";
 }

@@ -33,6 +33,7 @@ type PastDay = {
   prompt: string;
   players: number;
   top: { category: string; points: number } | null;
+  locked?: boolean;
 };
 type PastBoard = Results & { day: string; questionId: string; prompt: string };
 
@@ -97,7 +98,9 @@ export default function Home() {
     setStage("history");
     setHistoryError("");
     try {
-      const res = await fetch("/api/history", { cache: "no-store" });
+      const res = await fetch(`/api/history${player ? `?email=${encodeURIComponent(player)}` : ""}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error();
       setPastDays((await res.json()).days);
     } catch {
@@ -113,6 +116,10 @@ export default function Home() {
       const qs = new URLSearchParams({ day: d.day, questionId: d.questionId });
       if (player) qs.set("email", player);
       const res = await fetch(`/api/history/board?${qs}`, { cache: "no-store" });
+      if (res.status === 403) {
+        setHistoryError("Play this day first to see its board.");
+        return;
+      }
       if (!res.ok) throw new Error();
       setPastBoard(await res.json());
     } catch {
@@ -211,14 +218,23 @@ export default function Home() {
     } catch {}
     const open = s?.open ?? [];
     try {
-      if (open.length > 1) {
-        // Catch-up day: show the weekend questions with what they've already played
-        await Promise.all(open.map((q) => fetchResults(who, q, false).catch(() => null)));
+      // Check every open question so we know which days this player has missed
+      const all = await Promise.all(open.map((q) => fetchResults(who, q, false).catch(() => null)));
+      const todayIdx = open.findIndex((q) => q.day === s?.today);
+      if (todayIdx >= 0) {
+        // A normal game day: start with today's question
+        const q = open[todayIdx];
+        const r = all[todayIdx];
+        setQuestion(q);
+        if (r?.mine) {
+          setResults(r);
+          setStage("results");
+        } else {
+          setStage("play");
+        }
+      } else if (open.length) {
+        // Catch-up day: no new question, just the list of days
         setStage("pick");
-      } else if (open[0]) {
-        setQuestion(open[0]);
-        const r = await fetchResults(who, open[0]);
-        setStage(r.mine ? "results" : "play");
       }
     } catch {
       setStage("play");
@@ -226,6 +242,12 @@ export default function Home() {
       setBusy(false);
     }
   }
+
+  const openGames = schedule?.open ?? [];
+  const checked = openGames.length > 0 && openGames.every((q) => played[gameKey(q)] !== undefined);
+  const missed = checked ? openGames.filter((q) => !played[gameKey(q)]?.mine && q.day !== schedule?.today) : [];
+  const catchUpEnds = schedule?.event ? formatDay(schedule.event.catchUp) : "";
+  const byDay = (a: Question, b: Question) => a.day.localeCompare(b.day);
 
   const trimmed = answers.map((a) => a.trim());
   const allFilled = trimmed.every(Boolean);
@@ -266,6 +288,11 @@ export default function Home() {
           <img className="logo" src="/logo.png" alt="Survey Says" />
         </h1>
         <nav className="nav">
+          {player && missed.length > 0 && stage !== "pick" && (
+            <button className="nav-btn catch-btn" onClick={() => setStage("pick")}>
+              Catch up <span className="catch-count">{missed.length}</span>
+            </button>
+          )}
           {stage !== "loading" && stage !== "leaderboard" && (schedule?.status !== "before" || player) && (
             <button className="nav-btn" onClick={() => openLeaderboard()}>
               Leaderboard
@@ -316,7 +343,7 @@ export default function Home() {
         <>
           <h2 className="intro">
             {schedule?.status === "catchup"
-              ? "Catch-up day: answer the weekend questions you missed."
+              ? "Catch-up day: answer any questions you missed this week."
               : <>A new survey question every&nbsp;day. Give your top three answers.</>}
           </h2>
           <p className="sub">Then see how the rest of the team answered. We&rsquo;ll remember you on this device, so next time you&rsquo;ll go straight to the question.</p>
@@ -349,12 +376,14 @@ export default function Home() {
 
       {(stage === "play" || stage === "reveal") && question && (
         <>
-          {schedule && schedule.open.length > 1 && (
+          {question.day !== schedule?.today && (
             <div className="back-row">
               <button className="back" onClick={() => setStage("pick")}>
-                ← Weekend questions
+                ← All days
               </button>
-              <p className="board-date">{question.label}</p>
+              <p className="board-date">
+                Catching up · {question.label} ({formatShort(question.day)})
+              </p>
             </div>
           )}
           <section className="board" aria-label="Game board">
@@ -407,22 +436,34 @@ export default function Home() {
 
       {stage === "results" && results && question && (
         <>
-          {schedule && schedule.open.length > 1 && <p className="board-date">{question.label}</p>}
+          {question.day !== schedule?.today && (
+            <p className="board-date">
+              {question.label} ({formatShort(question.day)})
+            </p>
+          )}
+          {missed.length > 0 && question.day === schedule?.today && (
+            <div className="catch-banner">
+              <span>
+                You missed {missed.length === 1 ? "a day" : `${missed.length} days`} this week. You can still answer{" "}
+                {missed.length === 1 ? "it" : "them"} for full points until the end of {catchUpEnds}.
+              </span>
+              <button className="btn btn-small" onClick={() => openGame([...missed].sort(byDay)[0])}>
+                Catch up now
+              </button>
+            </div>
+          )}
           <ResultsView question={question} results={results} onRefresh={() => fetchResults(player, question)} />
-          {schedule && schedule.open.length > 1 && (
+          {question.day !== schedule?.today && (
             <div className="next-row">
-              {(() => {
-                const next = schedule.open.find((q) => q.day !== question.day && !played[gameKey(q)]?.mine);
-                return next ? (
-                  <button className="btn" onClick={() => openGame(next)}>
-                    Play {next.label} →
-                  </button>
-                ) : (
-                  <p className="hint">You&rsquo;re all caught up. Nice work!</p>
-                );
-              })()}
+              {missed.length > 0 ? (
+                <button className="btn" onClick={() => openGame([...missed].sort(byDay)[0])}>
+                  Play {[...missed].sort(byDay)[0].label} →
+                </button>
+              ) : (
+                <p className="hint">You&rsquo;re all caught up. Nice work!</p>
+              )}
               <button className="back" onClick={() => setStage("pick")}>
-                ← Weekend questions
+                ← All days
               </button>
             </div>
           )}
@@ -431,26 +472,39 @@ export default function Home() {
 
       {stage === "pick" && schedule && (
         <section className="history">
-          <h2 className="section-title">Catch-up day</h2>
+          {schedule.status !== "catchup" && (
+            <button className="back" onClick={() => schedule.open[0] && openGame(schedule.open[0])}>
+              ← Back to today&rsquo;s question
+            </button>
+          )}
+          <h2 className="section-title">{schedule.status === "catchup" ? "Catch-up day" : "This week’s questions"}</h2>
           <p className="sub left">
-            Don&rsquo;t work weekends? Answer Saturday&rsquo;s and Sunday&rsquo;s questions today. Your points count
-            toward the week, just like everyone else&rsquo;s.
+            {schedule.status === "catchup"
+              ? "No new question today. Answer any day you missed this week. "
+              : "Missed a day? You can still answer it. "}
+            Your answers count toward that day&rsquo;s board and you get full points, just like everyone else. Catch-up
+            closes at the end of {catchUpEnds}.
           </p>
           <ul className="history-list">
-            {schedule.open.map((q) => {
+            {[...schedule.open].sort(byDay).map((q) => {
               const r = played[gameKey(q)];
+              const isToday = q.day === schedule.today;
               return (
                 <li key={gameKey(q)}>
-                  <button className="history-item" onClick={() => openGame(q)}>
-                    <span className="h-date">{q.label}</span>
+                  <button className={`history-item ${r?.mine ? "done" : ""}`} onClick={() => openGame(q)}>
+                    <span className="h-date">
+                      {isToday ? "Today" : weekdayName(q.day)} · {formatShort(q.day)}
+                    </span>
                     <span className="h-prompt">{q.prompt}</span>
                     <span className="h-meta">
                       {r?.mine ? (
                         <>
-                          Done · <strong>{scoreOf(r)} pts</strong> · see results
+                          ✓ Done · <strong>{scoreOf(r)} pts</strong> · see results
                         </>
-                      ) : (
+                      ) : isToday ? (
                         "Not played yet"
+                      ) : (
+                        <span className="missed">Missed · play now for full points</span>
                       )}
                     </span>
                     <span className="h-arrow" aria-hidden>
@@ -505,8 +559,8 @@ export default function Home() {
               {formatShort(leaderboard.week.start)} – {formatShort(leaderboard.week.end)}. Points for each day come from
               that day&rsquo;s latest board, so everyone who gave the same answers gets the same points, whenever they
               played.
-              {schedule?.status === "catchup"
-                ? " Weekend points can still shift today while people catch up."
+              {schedule?.status === "catchup" || schedule?.status === "live"
+                ? ` Points can still shift as people play and catch up on missed days, until the end of ${catchUpEnds}.`
                 : schedule?.status === "over"
                   ? ""
                   : " Today\u2019s points can still shift until midnight."}
@@ -562,17 +616,27 @@ export default function Home() {
             <ul className="history-list">
               {pastDays.map((d) => (
                 <li key={`${d.day}|${d.questionId}`}>
-                  <button className="history-item" onClick={() => openPastBoard(d)}>
+                  <button
+                    className={`history-item ${d.locked ? "locked" : ""}`}
+                    onClick={() => {
+                      const q = openGames.find((g) => g.day === d.day);
+                      if (d.locked && q && player) openGame(q);
+                      else if (!d.locked) openPastBoard(d);
+                      else setStage("name");
+                    }}
+                  >
                     <span className="h-date">{formatDay(d.day)}</span>
                     <span className="h-prompt">{d.prompt}</span>
                     <span className="h-meta">
-                      {d.top ? (
+                      {d.locked ? (
+                        <span className="missed">🔒 You missed this day · play it to see the board</span>
+                      ) : d.top ? (
                         <>
                           Top answer: <strong>{d.top.category}</strong> ({d.top.points})
                           {" · "}
                         </>
                       ) : null}
-                      {d.players} {d.players === 1 ? "player" : "players"}
+                      {d.locked ? "" : `${d.players} ${d.players === 1 ? "player" : "players"}`}
                     </span>
                     <span className="h-arrow" aria-hidden>
                       →
@@ -626,6 +690,11 @@ function formatDay(day: string) {
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+function weekdayName(day: string) {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
 }
 
 function formatShort(day: string) {

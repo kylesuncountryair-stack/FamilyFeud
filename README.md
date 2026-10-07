@@ -99,8 +99,13 @@ Set `GAME_START` in Vercel to the Monday the event begins (e.g. `2026-09-28`), t
 
 - **Monday–Sunday:** one question per day, using the first 7 questions in
   `lib/questions.ts` in order (first question = Monday).
-- **The following Monday (catch-up day):** no new question. Players can answer the Saturday
-  and Sunday questions they missed; their points count toward the week.
+- **Catching up:** any day a player missed can still be answered, for full points, until the
+  end of the following Monday (catch-up day). A "Catch up" button in the header shows how
+  many days they missed. Late answers join that day's board, so everyone's points for that
+  day are recalculated and the leaderboard updates automatically.
+- **No peeking:** while a day can still be caught up on, its board (in Past boards and
+  everywhere else) stays locked for anyone who hasn't played it.
+- **The following Monday (catch-up day):** no new question, just the list of the week's days.
 - **After that:** the game shows "That's a wrap!" with the final standings and Past boards.
 - Before `GAME_START`, players see when the game starts.
 

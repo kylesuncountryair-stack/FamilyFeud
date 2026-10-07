@@ -11,5 +11,7 @@ export async function GET(req: Request) {
   const game = findOpenGame(p.get("day"), p.get("questionId"));
   if (!game) return NextResponse.json({ error: "That question isn't open right now." }, { status: 404 });
   const results = await buildResults(getStore(), gameKeys(game.day, game.question.id), p.get("email") ?? undefined);
-  return NextResponse.json({ day: game.day, questionId: game.question.id, ...results });
+  // No peeking: until you've played a question, you only see how many people have
+  const safe = results.mine ? results : { ...results, top: [] };
+  return NextResponse.json({ day: game.day, questionId: game.question.id, ...safe });
 }

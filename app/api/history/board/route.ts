@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { buildResults, gameKeys } from "@/lib/game";
-import { isFinished } from "@/lib/schedule";
+import { buildResults, gameKeys, playerKey } from "@/lib/game";
+import { boardAccess } from "@/lib/schedule";
 import { lookupPrompt } from "@/lib/history";
 import { getStore } from "@/lib/store";
 
@@ -14,11 +14,17 @@ export async function GET(req: Request) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[a-z0-9-]{1,80}$/i.test(questionId)) {
     return NextResponse.json({ error: "Unknown board." }, { status: 400 });
   }
-  if (!isFinished(day)) {
+  const store = getStore();
+  const email = p.get("email");
+  const played = email ? !!(await store.hget(gameKeys(day, questionId).subs, playerKey(email))) : false;
+  const access = boardAccess(day, played);
+  if (access === "locked") {
+    return NextResponse.json({ error: "Play this day first to see its board." }, { status: 403 });
+  }
+  if (access === "hidden") {
     return NextResponse.json({ error: "That board isn't finished yet." }, { status: 400 });
   }
 
-  const store = getStore();
   const [prompt, results] = await Promise.all([
     lookupPrompt(store, day, questionId),
     buildResults(store, gameKeys(day, questionId), p.get("email") ?? undefined),

@@ -27,7 +27,7 @@ export async function POST(req: Request) {
   // Normally today's question; on catch-up day, Saturday's or Sunday's
   const game = findOpenGame(body?.day, body?.questionId);
   if (!game) {
-    return NextResponse.json({ error: "That question isn't open anymore. Refresh the page." }, { status: 409 });
+    return NextResponse.json({ error: "That question isn't open right now. Refresh the page." }, { status: 409 });
   }
   const { day, question } = game;
   const store = getStore();
