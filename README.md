@@ -119,7 +119,15 @@ Edit `lib/questions.ts`. Give each question a stable `id`, and add `groups` keyw
 for the obvious buckets. To force a specific question (testing, special days), set
 `QUESTION_ID=forget-to-pack`.
 
-## Fixing groups by hand (admin)
+## Fixing groups (admin pages, open in a browser)
+
+- **See a day's groups:** `/api/admin/groups?key=ADMIN_KEY&day=2026-10-09` (day defaults to today)
+- **Re-sort a day from scratch** under the current grouping rules (points update automatically):
+  `/api/admin/rebuild?key=ADMIN_KEY&day=2026-10-09`, or `&day=all` for every day so far
+- **Move one answer** into a group (new or existing):
+  `/api/admin/move?key=ADMIN_KEY&day=2026-10-09&answer=hotel&to=Hotel`
+
+## Fixing groups by hand with curl (admin)
 
 See every group and the raw answers in it:
 

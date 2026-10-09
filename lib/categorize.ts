@@ -32,12 +32,12 @@ export function normalize(s: string) {
     .join(" ");
 }
 
-function titleCase(s: string) {
+export function titleCase(s: string) {
   const t = s.trim().replace(/\s+/g, " ");
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
 }
 
-function keywordMatch(norm: string, question: Question): string | null {
+export function keywordMatch(norm: string, question: Question): string | null {
   let best: { group: string; len: number } | null = null;
   for (const [group, words] of Object.entries(question.groups ?? {})) {
     for (const w of [group, ...words]) {
@@ -50,29 +50,54 @@ function keywordMatch(norm: string, question: Question): string | null {
   return best?.group ?? null;
 }
 
-export const GROUPING_RULES = `How a Family Feud host groups answers:
-- Group by the underlying idea, at the level most people would name it. Specific items go in their broad category: "pants", "skirt", "underwear" -> "Clothes"; "face wash", "toothbrush" -> "Toiletries".
-- Brand names go in their generic category: "Advil", "Tylenol", "ibuprofen" -> "Medication"; "Reader's Digest", "People" -> "Reading material".
-- Near-synonyms are one group: "charger", "charging cord" -> "Phone charger"; "magazine", "book" -> "Reading material".
-- Keep genuinely different ideas apart: "Passport" and "Clothes" are different; "Sunscreen" and "Toiletries" can stay separate if players name sunscreen specifically.
-- Group names: 1-3 words, sentence case, generic (never a brand name).
-- Fix obvious typos. Nonsense, jokes and non-answers go in "Other".`;
+export const GROUPING_RULES = `When two answers count as the SAME answer (a Family Feud host would accept them as one):
+- Same thing in different words: synonyms, slang, typos, plurals. "restroom", "lav", "bathroom" -> "Bathroom"; "charger", "charging cord" -> "Phone charger".
+- A brand or specific product of the thing: "Advil", "Tylenol" -> "Medication"; "Reader's Digest" -> "Magazine".
+- Specific items when the everyday answer is the umbrella word itself. For "something passengers forget to pack", "pants", "socks", "underwear" -> "Clothes", because "clothes" is how people actually answer that question.
 
-async function aiGroup(prompt: string, answers: string[], groups: string[]): Promise<string[] | null> {
+When answers are DIFFERENT answers (keep them apart):
+- Different things that only share a theme, setting or purpose. For "something that makes a trip feel like a real vacation", "sun", "beach", "hotel", "pool", "no work" and "good food" are six different answers. Never fold them into a theme such as "Destination", "Relaxation", "Amenities", "Weather" or "Experience".
+- If a host would ask "is that really the same thing?", it is not the same answer.
+- When in doubt, keep answers separate. A wrong merge is worse than two small groups.
+
+Group names: 1-3 words, sentence case, the plain everyday words people say (never a brand, never an abstract theme or category label like "Getting away" or "Lifestyle").
+If an answer doesn't match any existing group, give it its own new group named after the answer itself. Never use a catch-all group such as "Other" or "Misc".`;
+
+/**
+ * Asks Claude to group answers. Claude returns each answer paired with its group, and we
+ * match them back up by the answer's text, never by position, so one skipped or merged
+ * item can't shift every later answer into the wrong group. Returns one group per input
+ * answer, or null for any answer Claude didn't clearly assign (the caller then gives that
+ * answer its own group).
+ */
+export async function aiGroup(prompt: string, answers: string[], groups: string[]): Promise<(string | null)[] | null> {
   const system = `You group free-form answers for a Family Feud style survey game.
 ${GROUPING_RULES}
-- Strongly prefer an existing group when it fits. Only create a new group when none does.
-- Respond with ONLY a JSON array of strings, one group per answer, in the same order. No other text.`;
+- Put an answer in an existing group ONLY if it is the same answer as that group under these rules. Being related, or fitting the same theme, is not enough: create a new group instead.
+- Respond with ONLY a JSON array with one object per answer, copying each answer exactly as given: [{"answer": "...", "group": "..."}]. No other text.`;
 
   const user = `Survey question: ${prompt}
 Existing groups: ${groups.length ? JSON.stringify(groups) : "(none yet)"}
 Answers: ${JSON.stringify(answers)}`;
 
-  const res = await callClaude(system, user, 300);
+  const res = await callClaude(system, user, 200 + answers.length * 40);
   if (!res.ok) return null;
   const parsed = extractJSON<unknown[]>(res.text, "[");
-  if (!Array.isArray(parsed) || parsed.length !== answers.length) return null;
-  return parsed.map((g) => String(g).trim().slice(0, 40));
+  if (!Array.isArray(parsed)) return null;
+
+  const byAnswer = new Map<string, string>();
+  for (const item of parsed) {
+    if (!item || typeof item !== "object") continue;
+    const { answer, group } = item as { answer?: unknown; group?: unknown };
+    if (typeof answer !== "string" || typeof group !== "string" || !group.trim()) continue;
+    byAnswer.set(normalize(answer), group.trim().slice(0, 40));
+  }
+  return answers.map((a) => {
+    const g = byAnswer.get(normalize(a));
+    // A catch-all is never a real Feud answer: give the answer its own group instead
+    if (!g || /^(other|misc|miscellaneous|none|n\/a)$/i.test(g)) return null;
+    return g;
+  });
 }
 
 export async function categorize(
@@ -122,7 +147,7 @@ export async function categorize(
     const ai = await aiGroup(question.prompt, pending.map((i) => raws[i]), known);
 
     pending.forEach((i, j) => {
-      const suggested = ai?.[j];
+      const suggested = ai?.[j] ?? null;
       if (suggested) {
         // Reuse existing spelling if the AI returns a case variant
         const group = known.find((g) => g.toLowerCase() === suggested.toLowerCase()) ?? suggested;

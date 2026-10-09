@@ -16,6 +16,7 @@ export async function callClaude(system: string, user: string, maxTokens = 400):
       body: JSON.stringify({
         model: process.env.ANTHROPIC_MODEL || "claude-haiku-4-5-20251001",
         max_tokens: maxTokens,
+        temperature: 0, // same answers, same grouping, every time
         system,
         messages: [{ role: "user", content: user }],
       }),

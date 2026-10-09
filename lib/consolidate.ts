@@ -80,12 +80,13 @@ export async function consolidate(store: Store, keys: GameKeys, question: Questi
     .map((g) => `- ${JSON.stringify(g)}: ${groups[g].slice(0, 8).map((a) => JSON.stringify(a)).join(", ")}`)
     .join("\n");
 
-  const system = `You tidy up the answer board for a Family Feud style survey game.
-You get the current groups, each with the raw answers players typed. Merge groups that a Family Feud host would count as the same answer.
+  const system = `You check the answer board for a Family Feud style survey game for duplicate groups.
+You get the current groups, each with the raw answers players typed. Find groups that are really the SAME answer and should be one group.
 ${GROUPING_RULES}
-- You may merge into an existing group, or merge several groups into one new, better name (e.g. "Magazine" + "Readers digest" -> "Reading material").
-- Leave groups that are already distinct and well named alone.
-- Respond with ONLY a JSON object mapping each group that should change to its new group name, e.g. {"Advil": "Medication", "Skirt": "Clothes"}. Respond {} if nothing should change.`;
+- Only merge two groups if they are the same answer under these rules (usually one is a synonym, misspelling, brand, or specific example of the other, like "Advil" into "Medication").
+- Always merge INTO one of the existing group names listed below. Never invent a new umbrella name.
+- Most boards need few or no changes. When in doubt, do not merge.
+- Respond with ONLY a JSON object mapping each group that should be merged to the existing group it merges into, e.g. {"Advil": "Medication", "Lav": "Bathroom"}. Respond {} if nothing should change.`;
 
   const user = `Survey question: ${question.prompt}
 Current groups and the answers in them:
@@ -103,8 +104,10 @@ ${listing}`;
     if (!names.includes(from)) continue;
     const to = String(toRaw ?? "").trim().slice(0, 40);
     if (!to) continue;
-    const canonical = names.find((n) => n.toLowerCase() === to.toLowerCase()) ?? to;
-    if (canonical !== from) merges[from] = canonical;
+    // Only merge into a group that already exists, so the cleanup can never invent
+    // a broad umbrella ("Destination") that swallows different answers
+    const canonical = names.find((n) => n.toLowerCase() === to.toLowerCase());
+    if (canonical && canonical !== from) merges[from] = canonical;
   }
   if (!Object.keys(merges).length) return { merges, moved: 0 };
 
