@@ -9,6 +9,7 @@ export interface Store {
   hsetnx(key: string, field: string, value: string): Promise<boolean>;
   hincrby(key: string, field: string, by: number): Promise<number>;
   hlen(key: string): Promise<number>;
+  hdel(key: string, field: string): Promise<void>;
   del(key: string): Promise<void>;
 }
 
@@ -23,6 +24,9 @@ function redisStore(url: string, token: string): Store {
     hsetnx: async (k, f, v) => (await r.hsetnx(k, f, v)) === 1,
     hincrby: (k, f, by) => r.hincrby(k, f, by),
     hlen: (k) => r.hlen(k),
+    hdel: async (k, f) => {
+      await r.hdel(k, f);
+    },
     del: async (k) => {
       await r.del(k);
     },
@@ -54,6 +58,9 @@ function memoryStore(): Store {
       return n;
     },
     hlen: async (k) => h(k).size,
+    hdel: async (k, f) => {
+      h(k).delete(f);
+    },
     del: async (k) => {
       db.delete(k);
     },

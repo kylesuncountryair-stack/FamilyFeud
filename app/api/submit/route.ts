@@ -2,6 +2,7 @@ import { after, NextResponse } from "next/server";
 import { categorize } from "@/lib/categorize";
 import { consolidate } from "@/lib/consolidate";
 import { recordDay } from "@/lib/history";
+import { isBlocked } from "@/lib/players";
 import { buildResults, gameKeys, groupKey, playerKey, type Submission } from "@/lib/game";
 import { findOpenGame } from "@/lib/schedule";
 import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
@@ -22,6 +23,10 @@ export async function POST(req: Request) {
   }
   if (answers.length !== 3 || answers.some((a) => !a)) {
     return NextResponse.json({ error: "Fill in all three answers." }, { status: 400 });
+  }
+
+  if (await isBlocked(getStore(), email)) {
+    return NextResponse.json({ error: "This account has been removed from the game." }, { status: 403 });
   }
 
   // Normally today's question; on catch-up day, Saturday's or Sunday's
