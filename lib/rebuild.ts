@@ -22,7 +22,13 @@ export async function rebuildDay(store: Store, keys: GameKeys, question: Questio
 
   const groupOf = new Map<string, string>();
   const pending: string[] = [];
+  const pinned = await store.hgetall(keys.pinned);
   for (const [norm] of reps) {
+    const pin = pinned[norm];
+    if (typeof pin === "string") {
+      groupOf.set(norm, pin);
+      continue;
+    }
     const kw = keywordMatch(norm, question);
     if (kw) groupOf.set(norm, kw);
     else pending.push(norm);
@@ -89,7 +95,8 @@ export async function moveAnswer(store: Store, keys: GameKeys, answer: string, t
     if (touched) updated[who] = JSON.stringify(s);
   }
   await store.hset(keys.subs, updated);
-  await store.hset(keys.map, { [target]: to }); // future identical answers follow
+  await store.hset(keys.map, { [target]: to });
+  await store.hset(keys.pinned, { [target]: to }); // your fix always wins for future identical answers
   await rebuildCounts(store, keys);
   return moved;
 }

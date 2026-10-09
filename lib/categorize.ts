@@ -1,5 +1,5 @@
 import type { Question } from "./questions";
-import type { GameKeys } from "./game";
+import { groupKey, type GameKeys } from "./game";
 import type { Store } from "./store";
 import { callClaude, extractJSON } from "./claude";
 
@@ -107,20 +107,23 @@ export async function categorize(
   keys: GameKeys
 ): Promise<string[]> {
   const norms = raws.map(normalize);
-  const cache = await store.hgetall(keys.map);
+  const [cache, pinned] = await Promise.all([store.hgetall(keys.map), store.hgetall(keys.pinned)]);
   const out: (string | null)[] = raws.map(() => null);
   const toCache: Record<string, string> = {};
   const pending: number[] = [];
 
+  // Order: your manual fixes, then the keyword lists, then answers grouped earlier today, then Claude
   norms.forEach((n, i) => {
-    const cachedGroup = cache[n];
-    if (typeof cachedGroup === "string") return void (out[i] = cachedGroup);
+    const pin = pinned[n];
+    if (typeof pin === "string") return void (out[i] = pin);
     const kw = keywordMatch(n, question);
     if (kw) {
       out[i] = kw;
       toCache[n] = kw;
       return;
     }
+    const cachedGroup = cache[n];
+    if (typeof cachedGroup === "string") return void (out[i] = cachedGroup);
     pending.push(i);
   });
 
@@ -159,6 +162,13 @@ export async function categorize(
     });
   }
 
+  // Use the board's spelling for any group that differs only in capitalization ("Good Weather")
+  const known = [...Object.keys(question.groups ?? {}), ...Object.keys(await store.hgetall(keys.counts))];
+  const spelling = new Map<string, string>();
+  for (const g of known) if (!spelling.has(groupKey(g))) spelling.set(groupKey(g), g);
+  const final = (out as string[]).map((g) => spelling.get(groupKey(g)) ?? g);
+  for (const [n, g] of Object.entries(toCache)) toCache[n] = spelling.get(groupKey(g)) ?? g;
+
   await store.hset(keys.map, toCache);
-  return out as string[];
+  return final;
 }

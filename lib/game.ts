@@ -60,6 +60,7 @@ export function gameKeys(day: string, questionId: string) {
     counts: `${base}:counts`, // group -> number of players who said it
     subs: `${base}:subs`, // lowercased name -> Submission JSON
     map: `${base}:map`, // normalized answer -> group (grouping cache)
+    pinned: `${base}:pinned`, // normalized answer -> group, set by hand with the admin move tool (always wins)
   };
 }
 export type GameKeys = ReturnType<typeof gameKeys>;
@@ -77,24 +78,30 @@ export async function buildResults(store: Store, keys: GameKeys, forEmail?: stri
 
   const board = rankBoard(rawCounts, players);
   const counts = board.list;
-  const countOf = new Map(counts.map((c) => [c.category, c.count]));
-  const pointsOf = new Map(counts.map((c) => [c.category, c.points]));
-  const rank = new Map(counts.map((c, i) => [c.category, i]));
   const sub = parseJSON<Submission>(rawMine);
 
   const mine = sub
     ? {
         name: sub.name,
-        answers: sub.answers.map((a) => ({
-          ...a,
-          count: countOf.get(a.category) ?? 0,
-          points: pointsOf.get(a.category) ?? 0,
-          onBoard: (rank.get(a.category) ?? Infinity) < BOARD_SIZE,
-        })),
+        answers: sub.answers.map((a) => {
+          const g = board.byKey.get(groupKey(a.category));
+          return {
+            ...a,
+            category: g?.category ?? a.category, // same spelling as the board
+            count: g?.count ?? 0,
+            points: g?.points ?? 0,
+            onBoard: (g?.rank ?? Infinity) < BOARD_SIZE,
+          };
+        }),
       }
     : null;
 
   return { top: counts.slice(0, BOARD_SIZE), players, mine };
+}
+
+/** "Good Weather", "good weather " and "Good weather" are the same group. */
+export function groupKey(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 /**
@@ -104,17 +111,30 @@ export async function buildResults(store: Store, keys: GameKeys, forEmail?: stri
  */
 export function rankBoard(rawCounts: Record<string, unknown>, players: number) {
   const pct = (n: number) => (players > 0 ? Math.round((n / players) * 100) : 0);
-  const list = Object.entries(rawCounts)
-    .map(([category, n]) => ({ category, count: Number(n), points: pct(Number(n)) }))
-    .filter((c) => c.count > 0)
+  // Fold together names that differ only in capitalization/spacing; show the most-used spelling
+  const merged = new Map<string, { category: string; count: number; best: number }>();
+  for (const [category, raw] of Object.entries(rawCounts)) {
+    const n = Number(raw);
+    if (!(n > 0)) continue;
+    const k = groupKey(category);
+    const cur = merged.get(k);
+    if (!cur) merged.set(k, { category, count: n, best: n });
+    else {
+      cur.count += n;
+      if (n > cur.best) Object.assign(cur, { category, best: n });
+    }
+  }
+  const list = [...merged.values()]
+    .map(({ category, count }) => ({ category, count: Math.min(count, players || count), points: pct(Math.min(count, players || count)) }))
     .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
-  const onBoard = new Map(list.slice(0, BOARD_SIZE).map((c) => [c.category, c.points]));
-  return { list, onBoard };
+  const onBoard = new Map(list.slice(0, BOARD_SIZE).map((c) => [groupKey(c.category), c.points]));
+  const byKey = new Map(list.map((c, i) => [groupKey(c.category), { ...c, rank: i }]));
+  return { list, onBoard, byKey };
 }
 
 /** A player's score for a day: points for each distinct group of theirs that made the board. */
 export function scoreSubmission(sub: Submission, onBoard: Map<string, number>) {
-  return [...new Set(sub.answers.map((a) => a.category))].reduce((sum, g) => sum + (onBoard.get(g) ?? 0), 0);
+  return [...new Set(sub.answers.map((a) => groupKey(a.category)))].reduce((sum, k) => sum + (onBoard.get(k) ?? 0), 0);
 }
 
 /** Recompute group counts from submissions (used after an admin merge). */
@@ -124,7 +144,13 @@ export async function rebuildCounts(store: Store, keys: GameKeys) {
   for (const v of Object.values(subs)) {
     const s = parseJSON<Submission>(v);
     if (!s) continue;
-    for (const c of new Set(s.answers.map((a) => a.category))) counts[c] = (counts[c] ?? 0) + 1;
+    // once per player per group, however it's capitalized
+    const seen = new Set<string>();
+    for (const a of s.answers) {
+      if (seen.has(groupKey(a.category))) continue;
+      seen.add(groupKey(a.category));
+      counts[a.category] = (counts[a.category] ?? 0) + 1;
+    }
   }
   await store.del(keys.counts);
   await store.hset(keys.counts, counts);

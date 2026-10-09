@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 import { categorize } from "@/lib/categorize";
 import { consolidate } from "@/lib/consolidate";
 import { recordDay } from "@/lib/history";
-import { buildResults, gameKeys, playerKey, type Submission } from "@/lib/game";
+import { buildResults, gameKeys, groupKey, playerKey, type Submission } from "@/lib/game";
 import { findOpenGame } from "@/lib/schedule";
 import { EMAIL_DOMAIN, firstNameFromEmail, isValidEmail, normalizeEmail } from "@/lib/identity";
 import { logPlayToSheet } from "@/lib/sheets";
@@ -55,7 +55,8 @@ export async function POST(req: Request) {
   await recordDay(store, day, question);
 
   // Each player counts once per group, even if two of their answers landed in the same one
-  await Promise.all([...new Set(groups)].map((g) => store.hincrby(keys.counts, g, 1)));
+  const once = new Map(groups.map((g) => [groupKey(g), g])); // one vote per group per player
+  await Promise.all([...once.values()].map((g) => store.hincrby(keys.counts, g, 1)));
 
   // If this play started a new group, have Claude tidy the whole board afterwards
   // (e.g. fold a new "Advil" group into "Medication"). Players never wait on it.

@@ -76,8 +76,7 @@ export const QUESTIONS: Question[] = [
     prompt: "Name something that makes a trip feel like a real vacation",
     groups: {
       "No work": ["no work", "not working", "off work", "time off", "pto", "out of office", "no emails", "no email", "unplugging", "unplug", "no meetings"],
-      "Good weather": ["good weather", "warm weather", "nice weather", "hot weather", "sunny weather", "warmth", "warm", "weather", "heat"],
-      Sun: ["sun", "sunshine", "sunny"],
+      "Good weather": ["good weather", "warm weather", "nice weather", "hot weather", "sunny weather", "warmth", "warm", "weather", "heat", "sun", "sunshine", "sunny", "the sun", "sunny days"],
       Beach: ["beach", "ocean", "sand", "the beach", "beaches", "sea"],
       Hotel: ["hotel", "nice hotel", "room service", "hotel room"],
       Resort: ["resort", "all inclusive", "all-inclusive"],

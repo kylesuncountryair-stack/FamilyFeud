@@ -1,6 +1,6 @@
 import type { Question } from "./questions";
 import { QUESTIONS } from "./questions";
-import { gameKeys } from "./game";
+import { gameKeys, rankBoard } from "./game";
 import { questionOn } from "./schedule";
 import { parseJSON, type Store } from "./store";
 
@@ -73,13 +73,11 @@ export async function listPastDays(store: Store, today: string): Promise<PastDay
     days.map(async (d) => {
       const keys = gameKeys(d.day, d.questionId);
       const [players, counts] = await Promise.all([store.hlen(keys.subs), store.hgetall(keys.counts)]);
-      const best = Object.entries(counts)
-        .map(([category, n]) => ({ category, n: Number(n) }))
-        .sort((a, b) => b.n - a.n || a.category.localeCompare(b.category))[0];
+      const best = rankBoard(counts, players).list[0];
       return {
         ...d,
         players,
-        top: best && players ? { category: best.category, points: Math.round((best.n / players) * 100) } : null,
+        top: best && players ? { category: best.category, points: best.points } : null,
       };
     })
   );
