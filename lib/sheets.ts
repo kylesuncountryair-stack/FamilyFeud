@@ -27,7 +27,7 @@ export type SheetResult = {
  * it first redirects to another /exec URL, and turning that into a GET runs
  * doGet instead of saving the row. So we follow redirects by hand.
  */
-async function postToAppsScript(url: string, payload: string) {
+export async function postToAppsScript(url: string, payload: string) {
   let target = url;
   let method: "POST" | "GET" = "POST";
   for (let hop = 0; hop < 5; hop++) {
@@ -116,4 +116,44 @@ export async function logPlayToSheet(row: PlayRow): Promise<SheetResult> {
 function fail(problem: string, status?: number, response?: string): SheetResult {
   console.error("[survey-says] Sheet logging failed:", problem, response ?? "");
   return { ok: false, problem, status, response };
+}
+
+export type SheetPlay = { day: string; email: string; answers: { raw: string; category: string }[] };
+
+/** "2026-10-05", or "10/5/2026" if the sheet shows dates US-style */
+function toIsoDay(v: string) {
+  const s = v.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}` : s;
+}
+
+/** Every play logged in the Google Sheet (needs the Code.gs version with the export action). */
+export async function fetchSheetPlays(): Promise<{ ok: true; rows: SheetPlay[] } | { ok: false; problem: string }> {
+  const url = process.env.SHEETS_WEBHOOK_URL?.trim();
+  const secret = process.env.SHEETS_WEBHOOK_SECRET?.trim();
+  if (!url || !secret) return { ok: false, problem: "SHEETS_WEBHOOK_URL / SHEETS_WEBHOOK_SECRET aren't set in Vercel." };
+  try {
+    const { text } = await postToAppsScript(url, JSON.stringify({ secret, action: "export" }));
+    let body: { ok?: boolean; export?: boolean; error?: string; rows?: SheetPlay[] } | null = null;
+    try {
+      body = JSON.parse(text);
+    } catch {}
+    if (body?.error === "bad secret") return { ok: false, problem: "The sheet password doesn't match SHEETS_WEBHOOK_SECRET." };
+    if (!body?.export) {
+      return {
+        ok: false,
+        problem:
+          "The Google script doesn't support reading rows yet. Paste the latest Code.gs into Apps Script, keep your SECRET, then Deploy > Manage deployments > Edit > Version: New version > Deploy.",
+      };
+    }
+    const rows = (body.rows ?? []).map((r) => ({
+      day: toIsoDay(String(r.day ?? "")),
+      email: String(r.email ?? "").trim().toLowerCase(),
+      answers: (r.answers ?? []).map((a) => ({ raw: String(a.raw ?? ""), category: String(a.category ?? "").trim() })),
+    }));
+    return { ok: true, rows };
+  } catch (err) {
+    return { ok: false, problem: `Couldn't read the sheet: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }

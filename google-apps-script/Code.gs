@@ -30,6 +30,7 @@ function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     if (data.secret !== SECRET) return json({ ok: false, error: "bad secret" });
+    if (data.action === "export") return exportRows();
 
     const lock = LockService.getScriptLock();
     lock.waitLock(10000);
@@ -65,6 +66,35 @@ function doPost(e) {
   } catch (err) {
     return json({ ok: false, error: String(err) });
   }
+}
+
+/**
+ * Sends every logged play back to the game (used by the admin restore tool to put
+ * answers back in the groups they had when each person played).
+ */
+function exportRows() {
+  const ss = SPREADSHEET_ID ? SpreadsheetApp.openById(SPREADSHEET_ID) : SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss && ss.getSheetByName(SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) return json({ ok: true, export: true, rows: [] });
+  const range = sheet.getRange(2, 1, sheet.getLastRow() - 1, HEADERS.length);
+  const values = range.getValues();
+  const shown = range.getDisplayValues();
+  const tz = ss.getSpreadsheetTimeZone();
+  const rows = values.map((v, r) => {
+    // Sheets may have turned "2026-10-05" into a date; send it back as text
+    const day = v[1] instanceof Date ? Utilities.formatDate(v[1], tz, "yyyy-MM-dd") : String(shown[r][1]).trim();
+    const d = shown[r];
+    return {
+      day: day,
+      email: String(d[2]).trim().toLowerCase(),
+      answers: [
+        { raw: d[5], category: d[6] },
+        { raw: d[7], category: d[8] },
+        { raw: d[9], category: d[10] },
+      ],
+    };
+  });
+  return json({ ok: true, export: true, rows: rows });
 }
 
 /** Open the /exec URL in a browser to check the deployment is reachable. */
