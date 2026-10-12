@@ -1,5 +1,5 @@
 import { QUESTIONS, type Question } from "./questions";
-import { getToday, questionForDay } from "./game";
+import { getToday, questionForDay, resolveTimeZone } from "./game";
 
 /**
  * One-week event mode. Set GAME_START=YYYY-MM-DD (the Monday it begins):
@@ -21,6 +21,24 @@ export function shiftDay(day: string, delta: number) {
 export function weekdayOf(day: string) {
   const [y, m, d] = day.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+}
+
+/** Minutes past midnight right now, in the game's time zone. */
+function minutesNow() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: resolveTimeZone(process.env.GAME_TIMEZONE),
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return get("hour") * 60 + get("minute");
+}
+
+/** When catch-up day ends (GAME_END_TIME, 24h "HH:MM", default 12:00 = noon in GAME_TIMEZONE). */
+function endMinutes() {
+  const m = (process.env.GAME_END_TIME ?? "12:00").trim().match(/^(\d{1,2}):(\d{2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 12 * 60;
 }
 
 export function eventConfig() {
@@ -64,7 +82,7 @@ export function getSchedule() {
       .map((day) => ({ day, question: questionOn(day), label: label(day) }));
     return { today, status: "live" as Status, event: ev, open };
   }
-  if (today === ev.catchUp) {
+  if (today === ev.catchUp && minutesNow() < endMinutes()) {
     // Catch-up day: every day of the week is open for anyone who missed it
     const open = eventDays.map((day) => ({ day, question: questionOn(day), label: label(day) }));
     return { today, status: "catchup" as Status, event: ev, open };

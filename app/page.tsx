@@ -75,19 +75,19 @@ export default function Home() {
     if (!SIDE_STAGES.includes(stage)) setReturnTo(stage === "reveal" ? "play" : stage);
   }
 
-  async function openLeaderboard() {
+  async function openLeaderboard(who: string = player) {
     rememberReturn();
     setStage("leaderboard");
     setLbError("");
     setLeaderboard(null);
     try {
       const qs = new URLSearchParams();
-      if (player) qs.set("email", player);
+      if (who) qs.set("email", who);
       const res = await fetch(`/api/leaderboard?${qs}`, { cache: "no-store" });
       if (!res.ok) throw new Error();
       const data: Leaderboard = await res.json();
       setLeaderboard(data);
-      if (player) setWeekTotal(data.me?.total ?? 0);
+      if (who) setWeekTotal(data.me?.total ?? 0);
     } catch {
       setLbError("The leaderboard didn't load. Try again in a moment.");
     }
@@ -174,7 +174,11 @@ export default function Home() {
             setPlayer(who);
             refreshWeekTotal(who);
           }
-          setStage("closed");
+          if (s.status === "over") {
+            // Game's over: go straight to the final standings
+            setReturnTo("closed");
+            openLeaderboard(who);
+          } else setStage("closed");
           return;
         }
         setQuestion(s.open[0]);
@@ -254,6 +258,33 @@ export default function Home() {
   const hasDupes = new Set(trimmed.map((a) => a.toLowerCase())).size !== 3;
   const canLock = allFilled && !hasDupes && !busy;
 
+  /** If the game has ended, switch everyone to the final standings. Returns true if it has. */
+  async function checkForEnd() {
+    try {
+      const res = await fetch("/api/question", { cache: "no-store" });
+      if (!res.ok) return false;
+      const s: Schedule = await res.json();
+      if (s.status !== "over") return false;
+      setSchedule(s);
+      setReturnTo("closed");
+      setStage("leaderboard");
+      openLeaderboard();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Once a minute, check whether the game has ended (e.g. noon on catch-up day)
+  useEffect(() => {
+    if (!schedule || schedule.status === "over" || schedule.status === "before") return;
+    const id = setInterval(() => {
+      checkForEnd();
+    }, 60_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedule?.status, player]);
+
   async function lockIn() {
     if (!canLock || !question) return;
     setError("");
@@ -267,7 +298,9 @@ export default function Home() {
         body: JSON.stringify({ email: player, answers: trimmed, day: question?.day, questionId: question?.questionId }),
       });
       const data = await res.json();
+      if (!data.top && (await checkForEnd())) return; // the game closed while they were playing
       if (!res.ok && res.status !== 409) throw new Error(data.error || "Your answers didn't save.");
+      if (!data.top) throw new Error(data.error || "Your answers didn't save.");
       await minWait;
       setResults(data);
       if (question) setPlayed((prev) => ({ ...prev, [gameKey(question)]: data }));
@@ -547,15 +580,17 @@ export default function Home() {
 
       {stage === "leaderboard" && (
         <section className="history">
-          <button className="back" onClick={() => setStage(returnTo)}>
-            ← Back
-          </button>
+          {schedule?.status !== "over" && (
+            <button className="back" onClick={() => setStage(returnTo)}>
+              ← Back
+            </button>
+          )}
           <div className="lb-head">
-            <h2 className="section-title">Leaderboard</h2>
+            <h2 className="section-title">{schedule?.status === "over" ? "Final standings" : "Leaderboard"}</h2>
           </div>
           {leaderboard && (
             <p className="sub left">
-              {leaderboard.event && schedule?.status === "over" ? "Final standings · " : ""}
+              {leaderboard.event && schedule?.status === "over" ? "The game is over. Thanks for playing! " : ""}
               {formatShort(leaderboard.week.start)} – {formatShort(leaderboard.week.end)}. Points for each day come from
               that day&rsquo;s latest board, so everyone who gave the same answers gets the same points, whenever they
               played.
